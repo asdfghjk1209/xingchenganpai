@@ -594,6 +594,9 @@
             // NEW: State for tracking drag operations
             const [draggedItemIndex, setDraggedItemIndex] = useState(null);
 
+            const dragZoneSizePx = 50; 
+            const isMobileScreen = window.innerWidth < 768; // Determine if we are on a mobile-sized screen
+
             const updateItem = (id, field, val) => onUpdateDay({ ...day, items: day.items.map(i => i.id === id ? { ...i, [field]: val } : i) });
 
             // NEW: Function to reorder content between two time slots
@@ -793,16 +796,38 @@
                         <div 
                             key={item.id} 
                             className={`relative flex gap-4 group cursor-grab ${item.skipMap ? 'opacity-70' : ''}`}
-                            draggable={isEditing} // Only draggable in editing mode
-                            data-index={index} // Add index for touch handling
+                            draggable={isEditing} // 桌面鼠标拖动
+                            data-index={index} // 触摸处理的索引
                             onDragStart={(e) => handleDragStart(e, index)}
                             onDragEnd={handleDragEnd}
                             onDragOver={(e) => handleDragOver(e, index)}
                             onDrop={(e) => handleDrop(e, index)}
                             onTouchStart={(e) => {
-                                // Prevent default context menu on long press
-                                e.preventDefault(); 
-                                handleDragStart(e, index);
+                                if (!isEditing || e.touches.length !== 1) return;
+
+                                // --- 手机端拖动限制逻辑 ---
+                                if (isMobileScreen) {
+                                    const card = e.currentTarget;
+                                    const rect = card.getBoundingClientRect();
+                                    const touch = e.touches[0];
+                                    
+                                    // 检查触摸点是否位于右下角 dragZoneSizePx*dragZoneSizePx 区域
+                                    const isInDragZone = (
+                                        touch.clientX >= rect.right - dragZoneSizePx &&
+                                        touch.clientY >= rect.bottom - dragZoneSizePx
+                                    );
+                                    
+                                    if (isInDragZone) {
+                                        // 位于拖动区域：阻止默认滚动，并开始拖动
+                                        e.preventDefault(); 
+                                        handleDragStart(e, index);
+                                    } 
+                                    // 不在拖动区域：不做处理，允许正常滚动
+                                } else {
+                                    // 桌面/非移动设备：保持原始的触摸拖动行为（防止长按菜单，并开始拖动）
+                                    e.preventDefault();
+                                    handleDragStart(e, index);
+                                }
                             }}
                         >
                             <div className="flex flex-col items-center w-14 shrink-0 pt-2">
@@ -818,7 +843,7 @@
                                 )}
                                 <div className="w-0.5 h-full bg-gray-200 mt-2 rounded-full group-last:hidden" />
                             </div>
-                            <div className={`flex-1 glass-card rounded-2xl p-4 transition-all ${isEditing ? 'border border-dashed border-ios-blue/50' : 'border-transparent border'}`}>
+                            <div className={`flex-1 glass-card rounded-2xl p-4 transition-all relative ${isEditing ? 'border border-dashed border-ios-blue/50' : 'border-transparent border'}`}>
                                 <div className="flex justify-between items-start mb-2">
                                     {isEditing ? (
                                         // NEW: Dropdown for Type selection
@@ -876,6 +901,13 @@
                                     {isEditing && <button onClick={() => fileInputRefs.current[item.id]?.click()} className="aspect-square rounded-lg border-2 border-dashed flex flex-col items-center justify-center text-gray-400"><Camera size={20}/><span className="text-[10px]">添加</span></button>}
                                     <input type="file" className="hidden" multiple accept="image/*" ref={el => fileInputRefs.current[item.id] = el} onChange={e => onImageUpload(item.id, e.target.files)} />
                                 </div>
+                                
+                                {/* 拖动手柄视觉提示 (仅在编辑模式且为手机屏幕时显示) */}
+                                {isEditing && isMobileScreen && (
+                                    <div className="absolute bottom-1 right-1 p-1.5 bg-gray-100 rounded-lg opacity-70 cursor-grab hover:opacity-100 transition-opacity">
+                                        <MoveVertical size={18} className="text-gray-500" />
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ))}
