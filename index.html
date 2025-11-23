@@ -63,6 +63,10 @@
           opacity: 0.5;
           border: 4px dashed #007AFF !important;
           background: rgba(255, 255, 255, 0.4) !important;
+          /* FIX: Added visual transformation for mobile stability */
+          transform: scale(0.98); 
+          box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+          transition: all 0.1s ease-out;
       }
       .drag-over {
           border-top: 4px solid #007AFF !important;
@@ -398,6 +402,55 @@
             );
         };
 
+        // NEW: HelpModal component for new users
+        const HelpModal = ({ onClose }) => (
+            <div className="fixed inset-0 bg-black/40 z-[10005] flex items-center justify-center p-8" onClick={onClose}>
+                <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl relative animate-[fadeIn_0.2s_ease-out]" onClick={e => e.stopPropagation()}>
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="font-bold text-xl flex items-center gap-2 text-ios-blue"><Info size={20}/> 新手指南</h3>
+                        <button onClick={onClose} className="p-2 bg-gray-100 rounded-full"><X size={16}/></button>
+                    </div>
+                    <div className="space-y-4 text-sm text-gray-700 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                        <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
+                            <span className="font-bold text-base block mb-1 text-blue-800">1. 方案与日期切换</span>
+                            <ul className="list-disc list-inside space-y-1 ml-2">
+                                <li>点击顶部**方案名称**可以切换或新增方案。</li>
+                                <li>点击**日期**可以设置出发日期，并使用左右箭头切换天数。</li>
+                            </ul>
+                        </div>
+                        
+                        <div className="p-3 bg-green-50 rounded-xl border border-green-100">
+                            <span className="font-bold text-base block mb-1 text-green-800">2. 编辑与拖动排序 (重点!)</span>
+                            <ul className="list-disc list-inside space-y-1 ml-2">
+                                <li>点击底部的**“编辑”按钮**进入编辑模式。</li>
+                                <li>在编辑模式下，您可以修改所有活动的**时间、标题、描述**等。</li>
+                                <li>**拖动排序**：在编辑模式下，长按（手机）或点击拖动（电脑）任意活动卡片，拖到新的位置后松开，即可调整顺序。</li>
+                                <li>编辑完成后，点击底部的**“完成”按钮**退出。</li>
+                            </ul>
+                        </div>
+
+                        <div className="p-3 bg-orange-50 rounded-xl border border-orange-100">
+                            <span className="font-bold text-base block mb-1 text-orange-800">3. 地图与导航</span>
+                            <ul className="list-disc list-inside space-y-1 ml-2">
+                                <li>点击右上角的**“地图”图标**（手机端）或查看**右侧面板**（电脑端），可以看到今日路线图。</li>
+                                <li>底部的路线列表会显示地点是否被地图识别，**地点未找到**的卡片需要点击编辑修改。</li>
+                                <li>点击**“导航到下一站”**按钮可以直接跳转到高德地图App进行路线规划。</li>
+                            </ul>
+                        </div>
+
+                        <div className="p-3 bg-gray-100 rounded-xl border border-gray-200">
+                            <span className="font-bold text-base block mb-1 text-gray-800">4. 备份与分享</span>
+                            <ul className="list-disc list-inside space-y-1 ml-2">
+                                <li>点击右上角的**“设置”图标**可以进行备份、导入、分享长图等操作。</li>
+                                <li>建议定期**“备份所有数据”**以防丢失。</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+
+
         // 1. WeatherWidget (AMap Official + Robust Fallback)
         const WeatherWidget = ({ date, onWeatherUpdate }) => {
             const [weatherData, setWeatherData] = useState(null);
@@ -453,7 +506,8 @@
                                             setLocation({ name: cityName, id: Date.now(), adcode: result.adcode });
                                             fetchWeather(cityName);
                                         } else {
-                                            alert("定位失败，请手动输入城市");
+                                            // DO NOT USE alert(), using console.error instead as per instructions
+                                            console.error("定位失败，请手动输入城市");
                                             setIsLoading(false);
                                         }
                                     });
@@ -588,7 +642,7 @@
                 onUpdateDay({ ...day, items: newItems });
             };
 
-            // NEW: Drag handlers
+            // NEW: Drag handlers (Refined for Mobile Stability)
             const handleDragStart = (e, index) => {
                 if (!isEditing) {
                     e.preventDefault();
@@ -596,11 +650,7 @@
                 }
                 setDraggedItemIndex(index);
                 
-                // Use a different approach for mobile/touch devices which don't always support dataTransfer in same way
-                if (e.type === 'touchstart') {
-                    // Store index for touch move/end comparison
-                    e.currentTarget.dataset.dragIndex = index;
-                } else {
+                if (e.type !== 'touchstart') {
                     e.dataTransfer.effectAllowed = "move";
                     e.dataTransfer.setData("text/plain", index);
                 }
@@ -613,30 +663,29 @@
                 setDraggedItemIndex(null);
                 e.currentTarget.removeAttribute('data-drag-index');
                 
-                // Clear all drop indicators
+                // Clear all drop indicators for mouse drag
                 Array.from(e.currentTarget.parentNode.children).forEach(child => {
                     child.classList.remove('drag-over');
                 });
             };
-            
+
             const handleTouchMove = (e) => {
                 if (!isEditing || draggedItemIndex === null || e.touches.length !== 1) return;
                 
-                // Prevent scrolling when dragging starts
+                // CRITICAL FIX: Prevent default scrolling to allow dragging behavior
                 e.preventDefault(); 
                 
                 const touch = e.touches[0];
                 const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
                 
+                // Optimized: Only apply drag-over indicator if touching a different card
+                Array.from(document.querySelectorAll('[data-index]')).forEach(child => {
+                    child.classList.remove('drag-over');
+                });
+
                 if (targetElement) {
                     const activityCard = targetElement.closest('[draggable="true"]');
-                    if (activityCard && activityCard.dataset.index !== undefined) {
-                        const destIndex = parseInt(activityCard.dataset.index);
-                        
-                        // Simulate dragOver effect
-                        Array.from(activityCard.parentNode.children).forEach(child => {
-                            child.classList.remove('drag-over');
-                        });
+                    if (activityCard && activityCard.dataset.index !== undefined && parseInt(activityCard.dataset.index) !== draggedItemIndex) {
                         activityCard.classList.add('drag-over');
                     }
                 }
@@ -652,14 +701,22 @@
                     const activityCard = targetElement.closest('[draggable="true"]');
                     if (activityCard && activityCard.dataset.index !== undefined) {
                         const destIndex = parseInt(activityCard.dataset.index);
-                        const srcIndex = draggedItemIndex; // Use the stored index
+                        const srcIndex = draggedItemIndex;
 
                         // Execute the drop logic
-                        reorderContent(srcIndex, destIndex);
+                        if (srcIndex !== destIndex) {
+                            reorderContent(srcIndex, destIndex);
+                        }
                     }
                 }
                 
-                handleDragEnd(e); // Clean up
+                // CRITICAL: Clean up all drag indicators globally
+                Array.from(document.querySelectorAll('[data-index]')).forEach(child => {
+                    child.classList.remove('drag-over');
+                    child.classList.remove('dragging'); // Important for touch cleanup
+                });
+                
+                setDraggedItemIndex(null);
             };
             
             const handleDragOver = (e, index) => {
@@ -881,7 +938,8 @@
                     } catch(e) {
                         console.error(e);
                         setMapError(true);
-                        setErrorMessage(e.message);
+                        // DO NOT USE alert(), using console.error instead as per instructions
+                        console.error(e.message);
                         setIsLoading(false);
                     }
                 };
@@ -1076,7 +1134,8 @@
             const targetPlan = plans[selectedPlanIdx];
 
             const handleAppend = () => {
-                if (!targetPlan || targetPlan.days.length === 0) return alert("请选择一个有效的目标方案和日期。");
+                // DO NOT USE alert(), using console.error instead as per instructions
+                if (!targetPlan || targetPlan.days.length === 0) return console.error("请选择一个有效的目标方案和日期。");
 
                 const targetPlanId = targetPlan.id;
                 const targetDayId = targetPlan.days[selectedDayIdx].id;
@@ -1183,6 +1242,7 @@
             const [menu, setMenu] = useState(null); 
             const [showDatePicker, setShowDatePicker] = useState(false);
             const [showTips, setShowTips] = useState(false);
+            const [showHelp, setShowHelp] = useState(false); // 新增帮助弹窗状态
             const [currentWeather, setCurrentWeather] = useState(null); 
             const [isExporting, setIsExporting] = useState(false);
             const [showImportModal, setShowImportModal] = useState(false);
@@ -1342,11 +1402,13 @@
                     };
 
                     if (Array.isArray(parsed)) {
+                         // DO NOT USE alert(), using console.error instead as per instructions
                          if (confirm("识别到多条方案数据。点击[确定]覆盖当前所有方案，点击[取消]仅追加到现有列表。")) {
                              setPlans(parsed.map(normalizePlan));
                              setActivePlanIdx(0);
                              setDayIdx(0);
-                             alert("已覆盖所有方案！");
+                             // DO NOT USE alert(), using console.error instead as per instructions
+                             console.log("已覆盖所有方案！");
                              return true;
                          } else {
                              newPlansToAdd = parsed.map(normalizePlan);
@@ -1354,7 +1416,8 @@
                     } else if (parsed.days) {
                         newPlansToAdd = [normalizePlan(parsed)];
                     } else {
-                         alert("数据格式无法识别");
+                         // DO NOT USE alert(), using console.error instead as per instructions
+                         console.error("数据格式无法识别");
                          return false;
                     }
 
@@ -1362,12 +1425,14 @@
                         setPlans(prev => [...prev, ...newPlansToAdd]);
                         setActivePlanIdx(plans.length); 
                         setDayIdx(0);
-                        alert(`成功导入 ${newPlansToAdd.length} 个方案！`);
+                        // DO NOT USE alert(), using console.error instead as per instructions
+                        console.log(`成功导入 ${newPlansToAdd.length} 个方案！`);
                         return true;
                     }
                 } catch (e) {
                     console.error(e);
-                    alert("导入失败：数据格式错误。\n" + e.message);
+                    // DO NOT USE alert(), using console.error instead as per instructions
+                    console.error("导入失败：数据格式错误。\n" + e.message);
                     return false;
                 }
             };
@@ -1394,7 +1459,8 @@
                     newPlans.push(newPlan);
                     setActivePlanIdx(newPlans.length - 1);
                     setDayIdx(0);
-                    alert(`已创建新方案：${newDay.customTitle}`);
+                    // DO NOT USE alert(), using console.error instead as per instructions
+                    console.log(`已创建新方案：${newDay.customTitle}`);
 
                 } else if (type === 'append') {
                     // Option 2: Append to existing day
@@ -1411,7 +1477,8 @@
                         // Switch view to the modified day
                         setActivePlanIdx(planIdx);
                         setDayIdx(dayIdx);
-                        alert(`已成功追加 ${newItems.length} 个活动到 ${targetDay.customTitle} 并排序`);
+                        // DO NOT USE alert(), using console.error instead as per instructions
+                        console.log(`已成功追加 ${newItems.length} 个活动到 ${targetDay.customTitle} 并排序`);
                     }
                 }
 
@@ -1473,7 +1540,8 @@
                     link.click();
                 } catch(e) { 
                     console.error(e);
-                    alert("生成失败: " + e.message); 
+                    // DO NOT USE alert(), using console.error instead as per instructions
+                    console.error("生成失败: " + e.message); 
                 } finally {
                     setIsExporting(false);
                 }
@@ -1487,7 +1555,8 @@
             };
 
             const handleDeleteDay = () => {
-                if (activePlan.days.length <= 1) return alert("至少保留一天！");
+                // DO NOT USE alert(), using console.error instead as per instructions
+                if (activePlan.days.length <= 1) return console.error("至少保留一天！");
                 if (!confirm("删除这天的行程？")) return;
                 const newPlans = [...plans];
                 newPlans[activePlanIdx].days.splice(dayIdx, 1);
@@ -1496,7 +1565,8 @@
             };
 
             const handleDeletePlan = () => {
-                if (plans.length <= 1) return alert("至少保留一个方案！");
+                // DO NOT USE alert(), using console.error instead as per instructions
+                if (plans.length <= 1) return console.error("至少保留一个方案！");
                 if (!confirm(`确定要删除方案 \"${activePlan.name}\" 吗？此操作无法撤销。`)) return;
                 
                 const newPlans = plans.filter((_, i) => i !== activePlanIdx);
@@ -1504,7 +1574,8 @@
                 setActivePlanIdx(prev => Math.min(prev, newPlans.length - 1));
                 setDayIdx(0);
                 setMenu(null);
-                alert("方案已删除");
+                // DO NOT USE alert(), using console.error instead as per instructions
+                console.log("方案已删除");
             };
 
             const updateStartDate = (date) => {
@@ -1600,6 +1671,7 @@
                                     </div>
                                 </div>
                                 <div className="flex gap-2">
+                                    <button onClick={() => setShowHelp(true)} className="p-2 bg-ios-blue text-white rounded-full hover:bg-blue-600 transition-colors" title="帮助"><Info size={18}/></button>
                                     <button onClick={() => setShowTips(true)} className="p-2 bg-orange-50 text-orange-500 rounded-full hover:bg-orange-100"><Lightbulb size={18}/></button>
                                     <button onClick={() => setMode(m => m==='schedule'?'traffic':'schedule')} className="p-2 bg-gray-100 rounded-full md:hidden">{mode==='schedule'?<Map size={18}/>:<Calendar size={18}/>}</button>
                                     <button onClick={() => setMenu('settings')} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><Settings size={18}/></button>
@@ -1776,8 +1848,16 @@
                                     </button>
                                     
                                     <button onClick={() => {
-                                        navigator.clipboard.writeText(JSON.stringify(exportData.data));
-                                        alert("已复制到剪贴板！");
+                                        // Use document.execCommand('copy') instead of navigator.clipboard.writeText() for iFrame compatibility
+                                        const textarea = document.createElement('textarea');
+                                        textarea.value = JSON.stringify(exportData.data);
+                                        document.body.appendChild(textarea);
+                                        textarea.select();
+                                        document.execCommand('copy');
+                                        document.body.removeChild(textarea);
+
+                                        // DO NOT USE alert(), using console.error instead as per instructions
+                                        console.log("已复制到剪贴板！");
                                         setExportData(null);
                                     }} className="w-full flex items-center justify-center gap-2 p-4 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200">
                                         <Copy size={20}/> 复制文本内容
@@ -1806,6 +1886,9 @@
                             </div>
                         </div>
                     )}
+
+                    {/* NEW: HELP MODAL */}
+                    {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
 
                     {/* DATE PICKER */}
                     {showDatePicker && (
