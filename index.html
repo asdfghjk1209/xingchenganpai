@@ -1,0 +1,1278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>行程安排</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    
+    <script>
+      window._AMapSecurityConfig = {
+        securityJsCode: '6da6d6eb1afc97f8609795ec43fbec9f',
+      };
+
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              ios: {
+                blue: '#007AFF',
+                gray: '#F2F2F7',
+                card: 'rgba(255, 255, 255, 0.72)',
+                text: '#1C1C1E',
+                subtext: '#8E8E93',
+                destruct: '#FF3B30',
+                success: '#34C759',
+              }
+            },
+            fontFamily: {
+              sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+            }
+          }
+        }
+      }
+    </script>
+
+    <style>
+      body { background-color: #F2F2F7; -webkit-tap-highlight-color: transparent; }
+      .glass { background: rgba(255, 255, 255, 0.65); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-bottom: 1px solid rgba(0, 0, 0, 0.05); }
+      .glass-card { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(12px); box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.05); }
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      
+      @media (min-width: 768px) {
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: transparent; border-radius: 20px; transition: background-color 0.3s ease; }
+        .custom-scrollbar:hover::-webkit-scrollbar-thumb { background-color: rgba(0, 0, 0, 0.15); }
+      }
+
+      /* Time Picker Scroll Snap */
+      .time-scroll-col {
+        scroll-snap-type: y mandatory;
+        overscroll-behavior: contain;
+      }
+      .time-scroll-item {
+        scroll-snap-align: center;
+      }
+      
+      .amap-logo, .amap-copyright { z-index: 1 !important; display: block !important; pointer-events: none; }
+    </style>
+
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.292.0"
+      }
+    }
+    </script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { 
+            Calendar, Map, Share2, Settings, ChevronLeft, ChevronRight, Edit3, Check, Copy, Download, Upload, Menu,
+            Navigation2, Map as MapIcon, RefreshCw, Loader2, ExternalLink,
+            Clock, MapPin, Coffee, Camera, MoveVertical, Image as ImageIcon, Trash2,
+            CloudRain, Search, X, Plus, CalendarDays, LocateFixed, AlertCircle, Info, MapPinOff, Image, Eye, EyeOff,
+            Navigation, RotateCw, ArrowDown, Lightbulb, ChevronUp, ChevronDown, FileText, FileUp, FileDown
+        } from 'lucide-react';
+
+        // --- UTILS & DATA ---
+        const detectType = (title, desc) => {
+            const text = (title + desc).toLowerCase();
+            if (text.includes('吃') || text.includes('餐') || text.includes('火锅') || text.includes('串串') || text.includes('面') || text.includes('蛋烘糕') || text.includes('茶')) return 'food';
+            if (text.includes('酒店') || text.includes('休息') || text.includes('自然醒') || text.includes('睡觉')) return 'rest';
+            if (text.includes('高铁') || text.includes('车') || text.includes('地铁') || text.includes('飞')) return 'transport';
+            return 'spot';
+        };
+
+        const extractLocation = (l, title) => {
+            if (l && l.includes('query=')) {
+                try { return decodeURIComponent(l.split('query=')[1].split('&')[0]); } catch (e) { return title.split('(')[0]; }
+            }
+            let clean = title.split('(')[0].split('（')[0].trim();
+            clean = clean.replace(/^(晚餐|午餐|早餐|住宿|入住|酒店)[:：]\s*/, '');
+            return clean;
+        };
+
+        const RAW_DATA = [
+            {"id":"p1","name":"A: 落地 & 市区漫游","days":[{"title":"落地 & 休息","items":[{"t":"14:30","tit":"入住酒店","desc":"推荐春熙路/太古里。先整理休息，不急出门。\n酒店推荐：全季/亚朵","l":"","lt":"","imgs":[],"trans":""},{"t":"17:00","tit":"太古里漫步","desc":"看IFS熊猫屁股，大慈寺红墙拍照。","l":"https://ditu.amap.com/search?query=太古里","lt":"📍 导航","imgs":[],"trans":"🚶 步行"},{"t":"19:00","tit":"晚餐: 奎星楼街","desc":"冒椒火辣（冷锅串串，小菜很好吃；人多排队早去）、\n糖油果子（在冒椒火辣旁边一条街 早点去，去晚了就卖完了）、\n蛋烘糕","l":"https://ditu.amap.com/search?query=奎星楼街","lt":"📍 导航","imgs":[],"trans":"🚗 打车 15元"}]}]},
+            {"id":"p2","name":"B: 青城山问道","days":[{"title":"问道青城山","items":[{"t":"09:00","tit":"青城山","desc":"高铁直达，犀浦站出发，可选择前山或后山\n前山：寺庙之类、体验道家文化\n后山：风景","l":"","lt":"","imgs":[],"trans":"🚄 高铁"}]}]},
+            {"id":"p1763809470975","name":"C: 经典必打卡","days":[{"title":"经典一日游","items":[{"t":"10:00","tit":"锦里/宽窄巷子","desc":"","l":"","lt":"","imgs":[],"trans":""},{"t":"12:00","tit":"午饭","desc":"随便找家苍蝇馆子","l":"","lt":"","imgs":[],"trans":""},{"t":"14:00","tit":"人民公园","desc":"喝茶","l":"","lt":"","imgs":[],"trans":""},{"t":"17:00","tit":"晚餐","desc":"","l":"","lt":"","imgs":[],"trans":""}]}]},
+            {"id":"p1763816913109","name":"D: 熊猫 & 电影","days":[{"title":"熊猫 & 甜品","items":[{"t":"09:30","tit":"熊猫基地(南门)","desc":"打车直达南门，不排队。","l":"https://ditu.amap.com/search?query=熊猫基地南门","lt":"📍 导航","imgs":[],"trans":""},{"t":"16:00","tit":"就近市区吃饭","desc":"","l":"https://ditu.amap.com/search?query=奎星楼街","lt":"📍 导航","imgs":[],"trans":""},{"t":"18:00","tit":"看电影","desc":"疯狂动物城（记得买imax原声）","l":"","lt":"","imgs":[],"trans":""}]}]},
+            {"id":"p1763816971141","name":"E: 文艺打卡","days":[{"title":"文艺成都","items":[{"t":"10:00","tit":"人民公园","desc":"喝茶，感受成都人民慢生活","l":"","lt":"","imgs":[],"trans":""},{"t":"13:00","tit":"宽窄巷子","desc":"","l":"","lt":"","imgs":[],"trans":""},{"t":"16:00","tit":"东郊记忆","desc":"特色工业园区，拍照出片","l":"","lt":"","imgs":[],"trans":""},{"t":"18:00","tit":"建设路","desc":"集结各种小吃，边逛边吃","l":"","lt":"","imgs":[],"trans":""}]}]},
+            {"id":"p1763817288235","name":"F: 手作时光","days":[{"title":"安静午后","items":[{"t":"10:00","tit":"手工DIY","desc":"银饰/陶艺","l":"","lt":"","imgs":[],"trans":""}]}]},
+            {"id":"p1763828749511","name":"G: 特种兵(伪) Day1","days":[{"title":"熊猫 & 奎星楼","items":[{"t":"07:30","tit":"大熊猫基地(南门)","desc":"⚠️重点：一定要走南门！进门做摆渡车直冲最上面，然后走下来看。\n必看：花花（排队久）、萌兰。\n建议：早去，熊猫中午就睡觉了。","l":"","trans":"🚗 打车 40min","imgs":[],"lt":""},{"t":"12:30","tit":"建设路/奎星楼","desc":"看完熊猫饿了直接去吃！\n推荐：冒椒火辣、蛋烘糕、冰粉。\n避雷：不要买路边的金西梅（染色的）。","l":"","trans":"🚇 地铁3号线","imgs":[],"lt":""},{"t":"15:30","tit":"宽窄巷子","desc":"只逛不买！感受一下建筑风格就行。\n游客照打卡点，商业化比较重，不建议在里面吃饭。","l":"","trans":"🚶 步行","imgs":[],"lt":""},{"t":"19:00","tit":"小龙坎/蜀大侠","desc":"晚上整顿正宗火锅。\n提示：不能吃辣点微辣+唯怡豆奶。","l":"","trans":"🚗 打车","imgs":[],"lt":""}]}]},
+            {"id":"p1763828750759","name":"H: 特种兵(伪) Day2","days":[{"title":"祈福 & 太古里","items":[{"t":"10:00","tit":"文殊院","desc":"红墙拍照巨出片！\n特色：摸“福”字，吃洞子口张老二凉粉（甜水面一绝）。\n不用门票，门口可以领香。","l":"","trans":"🚇 地铁1号线","imgs":[],"lt":""},{"t":"14:00","tit":"IFS & 太古里","desc":"必打卡：IFS楼下的熊猫屁股（不用上楼排队）。\n大慈寺：就在太古里里面，闹中取静，喝个盖碗茶。","l":"","trans":"🚇 地铁2号线","imgs":[],"lt":""},{"t":"19:00","tit":"九眼桥/安顺廊桥","desc":"看夜景绝绝子！\n可以在河边的小酒馆坐坐，吹吹晚风，适合情侣。","l":"","trans":"🚗 打车 15元","imgs":[],"lt":""}]}]},
+            {"id":"p1763829583148","name":"I: 慢生活 Day1","days":[{"title":"人民公园 & 玉林","items":[{"t":"10:30","tit":"人民公园","desc":"核心：体验成都慢生活。\n必做：鹤鸣茶社喝茶（30元/杯），体验采耳（舒爽）。\n避雷：景区门口的“三大炮”不用买。","l":"","trans":"🚇 地铁","imgs":[],"lt":""},{"t":"13:30","tit":"成都博物馆","desc":"新馆非常震撼，了解蜀文化。\n⚠️注意：需要提前在公众号预约！周一闭馆。","l":"","trans":"🚶 步行可达","imgs":[],"lt":""},{"t":"18:00","tit":"玉林路小酒馆","desc":"《成都》歌里的玉林路。\n很多特色Bistro和小吃，不像太古里那么商业，很有烟火气。","l":"","trans":"🚗 打车","imgs":[],"lt":""}]}]},
+            {"id":"p1763829708510","name":"J: 慢生活 Day2","days":[{"title":"东郊记忆 & 建设路","items":[{"t":"11:00","tit":"东郊记忆","desc":"原本的工厂改建的，类似北京798。\n非常适合给女朋友拍照！有很多复古的墙绘和装置。","l":"","trans":"🚗 打车","imgs":[],"lt":""},{"t":"15:00","tit":"建设路小吃街","desc":"全成都排队最狠的小吃街。\n推荐：烤猪蹄、锅巴土豆、鸡翅包肥肠。\n建议：两个人分头排队，效率翻倍。","l":"","trans":"🚶 步行","imgs":[],"lt":""},{"t":"20:00","tit":"339电视塔","desc":"成都的地标塔，晚上亮灯很好看。附近有很多清吧。","l":"","trans":"🚗 打车","imgs":[],"lt":""}]}]},
+            {"id":"p1763829720206","name":"K: 历史文化","days":[{"title":"武侯祠 & 锦里","items":[{"t":"13:00","tit":"武侯祠","desc":"红墙竹影，非常有历史感。\n适合慢慢逛，听听讲解。","l":"","trans":"🚗 打车","imgs":[],"lt":""},{"t":"16:00","tit":"锦里古街","desc":"就在武侯祠隔壁。\n建议：傍晚去，红灯笼亮起来很美。小吃偏贵，尝尝就行。","l":"","trans":"🚶 步行","imgs":[],"lt":""},{"t":"19:00","tit":"芳草街","desc":"离锦里不远，很多很多好吃的苍蝇馆子，比景区便宜好吃。","l":"","trans":"🚲 共享单车","imgs":[],"lt":""}]}]},
+            {"id":"p_xhs_j_ren","name":"🔥 L: J人震撼攻略 (全4天)","days":[
+                {"title":"Day1: 时尚与夜景","items":[
+                    {"t":"10:00","tit":"春熙路","desc":"成都最繁华的商业街，打卡地标。\n推荐美食：西月城谭豆花（小吃）。","l":"春熙路","lt":"","imgs":[],"trans":"🚇 地铁2/3号线"},
+                    {"t":"11:30","tit":"IFS国际金融中心","desc":"必打卡：爬楼熊猫（7楼空中花园）。\n可以拍到熊猫正脸。","l":"成都IFS","lt":"","imgs":[],"trans":"🚶 步行"},
+                    {"t":"13:00","tit":"太古里 & 大慈寺","desc":"时尚与古老结合。大慈寺就在太古里里面，红墙拍照很好看。\n午餐可以在附近解决。","l":"远洋太古里","lt":"","imgs":[],"trans":"🚶 步行"},
+                    {"t":"16:00","tit":"望平街","desc":"沿河的网红街区，很多咖啡店、集市，适合Citywalk。","l":"望平街","lt":"","imgs":[],"trans":"🚗 打车/步行"},
+                    {"t":"19:30","tit":"安顺廊桥","desc":"九眼桥附近，看夜景绝绝子！\n适合吹晚风，去酒吧街坐坐。","l":"安顺廊桥","lt":"","imgs":[],"trans":"🚶 沿河步行"}
+                ]},
+                {"title":"Day2: 熊猫与历史","items":[
+                    {"t":"07:30","tit":"大熊猫基地(南门)","desc":"⚠️重点：一定要走南门！排队人少。\n必看：花花、萌兰。\n建议早起，熊猫上午活跃。","l":"成都大熊猫繁育研究基地(南门)","lt":"","imgs":[],"trans":"🚗 打车前往"},
+                    {"t":"12:30","tit":"文殊院","desc":"免门票。红墙拍照出片，可以摸“福”字。\n必吃：门口的宫廷糕点、洞子口张老二凉粉。","l":"文殊院","lt":"","imgs":[],"trans":"🚇 地铁"},
+                    {"t":"15:00","tit":"杜甫草堂 & 浣花溪","desc":"感受诗圣情怀，红墙竹林很美。\n浣花溪公园就在旁边，环境清幽。","l":"杜甫草堂","lt":"","imgs":[],"trans":"🚗 打车"},
+                    {"t":"17:30","tit":"武侯祠","desc":"三国迷必去，著名的“红墙竹影”机位就在这里。","l":"武侯祠","lt":"","imgs":[],"trans":"🚇 地铁/打车"},
+                    {"t":"19:30","tit":"锦里古街","desc":"就在武侯祠隔壁。晚上亮灯后很漂亮，适合看夜景。\n小吃偏贵，建议只逛不吃或少吃。","l":"锦里古街","lt":"","imgs":[],"trans":"🚶 步行"}
+                ]},
+                {"title":"Day3: 慢活与文艺","items":[
+                    {"t":"09:30","tit":"人民公园","desc":"必做：鹤鸣茶社喝盖碗茶，体验采耳。\n感受成都真正的慢生活。","l":"人民公园","lt":"","imgs":[],"trans":"🚇 地铁"},
+                    {"t":"11:30","tit":"宽窄巷子","desc":"标志性景点，看看老建筑。\n人多商业化重，逛逛就行。","l":"宽窄巷子","lt":"","imgs":[],"trans":"🚶 步行"},
+                    {"t":"14:00","tit":"成都博物馆","desc":"⚠️需提前在公众号预约！\n非常值得一看，了解成都历史文化。","l":"成都博物馆","lt":"","imgs":[],"trans":"🚶 步行"},
+                    {"t":"16:30","tit":"东郊记忆","desc":"旧工厂改建的创意园区，工业风满满。\n非常适合拍照，有很多复古装置。","l":"东郊记忆","lt":"","imgs":[],"trans":"🚗 打车"},
+                    {"t":"18:30","tit":"建设路小吃街","desc":"吃货天堂！\n推荐：烤猪蹄、锅巴土豆、徐亮烤蹄。","l":"建设路","lt":"","imgs":[],"trans":"🚗 打车"},
+                    {"t":"20:30","tit":"玉林路","desc":"《成都》歌里的地方。\n很多小酒馆和Bistro，感受成都的烟火气。","l":"玉林西路","lt":"","imgs":[],"trans":"🚗 打车"}
+                ]},
+                {"title":"Day4: 都江堰一日","items":[
+                    {"t":"09:00","tit":"仰天窝广场","desc":"打卡迪丽热巴同款“自拍大熊猫”。\n建议高铁坐到【离堆公园站】。","l":"仰天窝广场","lt":"","imgs":[],"trans":"🚄 高铁"},
+                    {"t":"10:30","tit":"熊猫谷","desc":"可以看到散养的小熊猫，人比基地少很多，体验更好。","l":"熊猫谷","lt":"","imgs":[],"trans":"🚗 打车"},
+                    {"t":"13:00","tit":"灌县古城","desc":"吃午饭，逛古城。推荐：北街米线、叶婆婆豆浆馍馍。","l":"灌县古城","lt":"","imgs":[],"trans":"🚗 打车"},
+                    {"t":"15:00","tit":"都江堰景区","desc":"“拜水都江堰”，震撼的水利工程。\n建议路线：离堆公园入口进 -> 伏龙观 -> 宝瓶口 -> 飞沙堰 -> 鱼嘴 -> 安澜索桥。","l":"都江堰景区","lt":"","imgs":[],"trans":"🚶 步行"},
+                    {"t":"18:00","tit":"文庙街","desc":"有很多旧物件和复古店铺，拍照很有感觉。","l":"文庙街","lt":"","imgs":[],"trans":"🚶 步行"},
+                    {"t":"20:00","tit":"南桥","desc":"必看！晚上开灯后的“蓝眼泪”夜景，非常震撼。","l":"南桥","lt":"","imgs":[],"trans":"🚶 步行"}
+                ]}
+            ]}
+        ];
+
+        const DEFAULT_PLANS = RAW_DATA.map(p => ({
+            id: p.id,
+            name: p.name,
+            startDate: new Date().toISOString().split('T')[0],
+            days: p.days.map((d, dIdx) => ({
+                id: `d_${p.id}_${dIdx}`,
+                customTitle: d.title,
+                items: d.items.map((i, iIdx) => ({
+                    id: `i_${p.id}_${dIdx}_${iIdx}`,
+                    time: i.t,
+                    title: i.tit,
+                    description: i.desc,
+                    location: extractLocation(i.l, i.tit),
+                    type: detectType(i.tit, i.desc),
+                    transportDetail: i.trans,
+                    images: [],
+                    skipMap: false 
+                }))
+            }))
+        }));
+
+        const STORAGE_KEY = 'chengdu_love_trip_data_v29';
+        const savePlans = (plans) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(plans)); } catch (e) { console.error("Storage error"); } };
+        const loadPlans = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || DEFAULT_PLANS; } catch { return DEFAULT_PLANS; } };
+        const fileToBase64 = (file) => new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.readAsDataURL(file); });
+
+        // --- UTILS: AMAP ---
+        const AMAP_KEY = '85b427e744386038421b5b0bdb657f30';
+        
+        const loadAMap = () => {
+            if (window.AMap && window.AMap.Map) return Promise.resolve();
+            if (window.__amap_init_promise) return window.__amap_init_promise;
+            const promise = new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = `https://webapi.amap.com/maps?v=2.0&key=${AMAP_KEY}&plugin=AMap.Scale,AMap.ToolBar,AMap.Geocoder,AMap.Polyline,AMap.Marker,AMap.Weather,AMap.Geolocation,AMap.CitySearch`;
+                script.onload = () => resolve();
+                script.onerror = () => reject("Failed to load AMap");
+                document.head.appendChild(script);
+            });
+            window.__amap_init_promise = promise;
+            return promise;
+        };
+
+        const getAmapWeatherIcon = (type) => {
+            if(!type) return '🌤️';
+            if(type.includes('晴')) return '☀️';
+            if(type.includes('阴') || type.includes('云')) return '☁️';
+            if(type.includes('雨')) return '🌧️';
+            if(type.includes('雪')) return '❄️';
+            if(type.includes('雷')) return '⛈️';
+            return '🌤️';
+        };
+
+        // --- COMPONENTS ---
+
+        // NEW: Export Template Components
+        const ExportItem = ({ item }) => (
+            <div className={`relative flex gap-4 group mb-4 break-inside-avoid`}>
+                <div className="flex flex-col items-center w-14 shrink-0 pt-2">
+                    <span className="text-sm font-bold font-mono text-gray-800">{item.time}</span>
+                    <div className="w-0.5 h-full bg-gray-200 mt-2 rounded-full" />
+                </div>
+                <div className="flex-1 bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+                    <div className="flex justify-between items-start mb-2">
+                        <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] font-bold uppercase">{item.type}</span>
+                    </div>
+                    <h3 className="font-bold text-lg mb-1 flex items-center gap-2 text-gray-900">{item.title} {item.skipMap && <span className="text-xs font-normal text-gray-400 bg-gray-100 px-1.5 rounded">暂定</span>}</h3>
+                    <div className="flex items-center gap-1.5 text-xs text-gray-500 mb-3">
+                        <MapPin size={12} />
+                        <span className={item.skipMap ? "line-through opacity-50" : ""}>{item.location}</span>
+                    </div>
+                    <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{item.description}</p>
+                    {item.images.length > 0 && (
+                        <div className="mt-4 grid grid-cols-3 gap-2">
+                            {item.images.map((img, idx) => (
+                                <div key={idx} className="relative aspect-square rounded-lg overflow-hidden bg-gray-100">
+                                    <img src={img} className="w-full h-full object-cover" />
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+
+        const PlanExportView = ({ plan }) => {
+            return (
+                <div className="bg-[#F2F2F7] p-8 w-[600px] mx-auto min-h-screen">
+                    <div className="text-center mb-10">
+                        <h1 className="text-3xl font-bold text-gray-900 mb-2">{plan.name}</h1>
+                        <p className="text-gray-500">行程规划清单</p>
+                    </div>
+                    
+                    <div className="space-y-10">
+                        {plan.days.map((day, index) => (
+                            <div key={day.id} className="relative">
+                                <div className="flex items-center gap-4 mb-6">
+                                    <div className="bg-blue-600 text-white px-4 py-2 rounded-xl font-bold text-lg shadow-md z-10">
+                                        Day {index + 1}
+                                    </div>
+                                    <div className="font-bold text-xl text-gray-800">{day.customTitle}</div>
+                                    <div className="h-px bg-gray-300 flex-1 ml-4"></div>
+                                </div>
+                                <div className="pl-2">
+                                    {day.items.map((item, idx) => (
+                                        <ExportItem key={item.id} item={item} />
+                                    ))}
+                                    {day.items.length === 0 && <div className="text-center text-gray-400 py-4">本日暂无安排</div>}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="mt-12 text-center text-gray-400 text-sm border-t border-gray-200 pt-6">
+                        Generated by Chengdu Guide
+                    </div>
+                </div>
+            );
+        };
+
+        // 0. TimePicker Component (New Scrolling Design)
+        const TimePicker = ({ value, onChange, onClose }) => {
+            const [hour, setHour] = useState(parseInt(value.split(':')[0]) || 9);
+            const [minute, setMinute] = useState(parseInt(value.split(':')[1]) || 0);
+            const hours = Array.from({ length: 24 }, (_, i) => i);
+            const minutes = Array.from({ length: 60 }, (_, i) => i);
+
+            const handleConfirm = () => {
+                const h = hour.toString().padStart(2, '0');
+                const m = minute.toString().padStart(2, '0');
+                onChange(`${h}:${m}`);
+                onClose();
+            };
+
+            const hourRef = useRef(null);
+            const minuteRef = useRef(null);
+
+            // Auto scroll to current value
+            useEffect(() => {
+                if (hourRef.current) hourRef.current.scrollTop = hour * 40;
+                if (minuteRef.current) minuteRef.current.scrollTop = minute * 40;
+            }, []);
+
+            return (
+                <div className="fixed inset-0 z-[10001] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm ui-control" onClick={onClose}>
+                    <div className="bg-white w-full max-w-xs rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl animate-[slideUp_0.2s_ease-out]" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="font-bold text-lg">选择时间</h3>
+                            <button onClick={handleConfirm} className="text-ios-blue font-bold px-4 py-1 rounded-full bg-blue-50">确定</button>
+                        </div>
+                        <div className="flex h-48 relative">
+                            {/* Selection Highlight Bar */}
+                            <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-10 border-t border-b border-gray-200 pointer-events-none bg-gray-50/30"></div>
+                            
+                            {/* Hours Column */}
+                            <div ref={hourRef} className="flex-1 overflow-y-auto no-scrollbar time-scroll-col text-center scroll-smooth" 
+                                 onScroll={(e) => {
+                                     const h = Math.round(e.target.scrollTop / 40);
+                                     if(h >=0 && h<=23) setHour(h);
+                                 }}>
+                                <div className="h-[80px]"></div> 
+                                {hours.map(h => (
+                                    <div key={h} className={`h-10 flex items-center justify-center text-lg transition-all ${h === hour ? 'text-black font-bold scale-110' : 'text-gray-300'}`}>
+                                        {h.toString().padStart(2, '0')}
+                                    </div>
+                                ))}
+                                <div className="h-[80px]"></div>
+                            </div>
+
+                            <div className="w-4 flex items-center justify-center font-bold pb-1 text-gray-400">:</div>
+
+                            {/* Minutes Column */}
+                            <div ref={minuteRef} className="flex-1 overflow-y-auto no-scrollbar time-scroll-col text-center scroll-smooth" 
+                                 onScroll={(e) => {
+                                     const m = Math.round(e.target.scrollTop / 40);
+                                     if(m >=0 && m<=59) setMinute(m);
+                                 }}>
+                                <div className="h-[80px]"></div>
+                                {minutes.map(m => (
+                                    <div key={m} className={`h-10 flex items-center justify-center text-lg transition-all ${m === minute ? 'text-black font-bold scale-110' : 'text-gray-300'}`}>
+                                        {m.toString().padStart(2, '0')}
+                                    </div>
+                                ))}
+                                <div className="h-[80px]"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // 1. WeatherWidget (AMap Official + Robust Fallback)
+        const WeatherWidget = ({ date, onWeatherUpdate }) => {
+            const [weatherData, setWeatherData] = useState(null);
+            const [location, setLocation] = useState({ id: 1, name: '成都', adcode: '510100' });
+            const [isSearching, setIsSearching] = useState(false);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+
+            const fetchWeather = (cityName) => {
+                if (!window.AMap) return;
+                setIsLoading(true);
+                window.AMap.plugin('AMap.Weather', function() {
+                    var weather = new window.AMap.Weather();
+                    weather.getForecast(cityName, function(err, data) {
+                        setIsLoading(false);
+                        if (!err && data.forecasts && data.forecasts.length > 0) {
+                            setWeatherData(data);
+                            if(onWeatherUpdate) onWeatherUpdate({ location: location.name, weather: data.forecasts[0] });
+                        }
+                    });
+                });
+            };
+
+            useEffect(() => {
+                loadAMap().then(() => fetchWeather(location.name)).catch(console.error);
+            }, []);
+
+            const handleLocate = () => {
+                setIsLoading(true);
+                loadAMap().then(() => {
+                    window.AMap.plugin('AMap.Geolocation', function() {
+                        var geolocation = new window.AMap.Geolocation({
+                            enableHighAccuracy: true,
+                            timeout: 3000, 
+                        });
+                        geolocation.getCurrentPosition(function(status, result) {
+                            if (status === 'complete') {
+                                const comp = result.addressComponent;
+                                let displayName = comp.district || '';
+                                if (comp.township) displayName += ' ' + comp.township;
+                                else if (comp.street) displayName += ' ' + comp.street;
+                                if (!displayName) displayName = result.formattedAddress;
+
+                                const newName = displayName;
+                                setLocation({ name: newName, id: Date.now(), adcode: comp.adcode });
+                                fetchWeather(comp.adcode); 
+                            } else {
+                                window.AMap.plugin('AMap.CitySearch', function() {
+                                    var citySearch = new window.AMap.CitySearch();
+                                    citySearch.getLocalCity(function(status, result) {
+                                        if (status === 'complete' && result.info === 'OK') {
+                                            const cityName = result.city; 
+                                            setLocation({ name: cityName, id: Date.now(), adcode: result.adcode });
+                                            fetchWeather(cityName);
+                                        } else {
+                                            alert("定位失败，请手动输入城市");
+                                            setIsLoading(false);
+                                        }
+                                    });
+                                });
+                            }
+                        });
+                    });
+                });
+            };
+
+            const handleSearch = (e) => {
+                e.preventDefault();
+                if(!searchQuery.trim()) return;
+                setIsLoading(true);
+                setLocation(prev => ({ ...prev, name: searchQuery }));
+                fetchWeather(searchQuery);
+                setIsSearching(false);
+            };
+
+            return (
+                <div className="glass-card p-5 rounded-3xl mb-6 text-ios-text relative overflow-hidden group transition-all">
+                    <div className="flex justify-between items-start mb-4">
+                        <div onClick={() => setIsSearching(!isSearching)} className="cursor-pointer">
+                            <div className="flex items-center gap-1.5">
+                                <MapPin size={14} className="text-ios-blue"/>
+                                <span className="font-bold truncate max-w-[180px]">{location.name}</span>
+                                {isLoading && <Loader2 size={12} className="animate-spin text-gray-400"/>}
+                            </div>
+                            <div className="text-xs text-ios-subtext mt-0.5">{new Date(date).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</div>
+                        </div>
+                        
+                        {!isSearching && (
+                            <div className="flex items-center gap-3 ui-control">
+                                <div className="flex gap-2">
+                                    <button onClick={handleLocate} className="p-2 bg-gray-100 rounded-full hover:bg-blue-50 text-gray-500 hover:text-blue-600 transition-colors" title="定位当前位置"><Navigation size={14}/></button>
+                                    <button onClick={() => fetchWeather(location.name)} className="p-2 bg-gray-100 rounded-full hover:bg-blue-50 text-gray-500 hover:text-blue-600 transition-colors" title="刷新天气"><RotateCw size={14}/></button>
+                                </div>
+                                {weatherData && weatherData.forecasts && weatherData.forecasts[0] && (
+                                    <div className="text-right">
+                                        <div className="text-3xl font-bold">
+                                            {weatherData.forecasts[0].dayTemp}° <span className="text-lg text-ios-subtext">/ {weatherData.forecasts[0].nightTemp}°</span>
+                                        </div>
+                                        <div className="text-sm opacity-80">{weatherData.forecasts[0].dayWeather}</div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                    
+                    {!isSearching && weatherData && weatherData.forecasts && (
+                        <div className="mt-4 pt-4 border-t border-gray-100/50">
+                            <div className="flex gap-6 overflow-x-auto no-scrollbar pb-2">
+                                {weatherData.forecasts.map((day, i) => {
+                                    const dateObj = new Date(day.date);
+                                    const dayName = i === 0 ? '今天' : i === 1 ? '明天' : dateObj.toLocaleDateString('zh-CN', {weekday: 'short'});
+                                    return (
+                                        <div key={i} className={`flex flex-col items-center shrink-0 space-y-1 ${i === 0 ? 'opacity-100 scale-110 font-bold' : 'opacity-60'}`}>
+                                            <span className="text-[10px] uppercase">{dayName}</span>
+                                            <span className="text-2xl drop-shadow-sm">{getAmapWeatherIcon(day.dayWeather)}</span>
+                                            <span className="text-xs whitespace-nowrap">{day.dayTemp}°/{day.nightTemp}°</span>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {isSearching && (
+                        <div className="absolute inset-0 bg-white/95 z-20 p-4 flex flex-col">
+                            <form onSubmit={handleSearch} className="flex gap-2 mb-4">
+                                <input className="flex-1 bg-gray-100 rounded-xl px-4 py-2 text-sm" placeholder="输入城市..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} autoFocus/>
+                                <button type="button" onClick={() => setIsSearching(false)} className="p-2"><X size={16}/></button>
+                            </form>
+                            <div className="text-xs text-gray-400 text-center mt-4">按回车搜索 (数据来源: 高德)</div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const ScheduleView = ({ day, isEditing, onUpdateDay, onImageUpload, setIsEditing }) => {
+            const fileInputRefs = useRef({});
+            const [timePickerTarget, setTimePickerTarget] = useState(null);
+
+            const updateItem = (id, field, val) => onUpdateDay({ ...day, items: day.items.map(i => i.id === id ? { ...i, [field]: val } : i) });
+            
+            return (
+                <div className="space-y-6 pb-24 relative">
+                    {day.items.map((item, index) => (
+                        <React.Fragment key={item.id}>
+                            <div className={`relative flex gap-4 group ${item.skipMap ? 'opacity-70' : ''}`}>
+                                <div className="flex flex-col items-center w-14 shrink-0 pt-2">
+                                    {isEditing ? (
+                                        <div 
+                                            className="w-full text-sm font-bold bg-white border border-blue-300 rounded px-1 py-1 text-center cursor-pointer hover:bg-blue-50 text-ios-blue"
+                                            onClick={() => setTimePickerTarget({ id: item.id, value: item.time })}
+                                        >
+                                            {item.time}
+                                        </div>
+                                    ) : (
+                                        <span className="text-sm font-bold font-mono">{item.time}</span>
+                                    )}
+                                    <div className="w-0.5 h-full bg-gray-200 mt-2 rounded-full group-last:hidden" />
+                                </div>
+                                <div className={`flex-1 glass-card rounded-2xl p-4 transition-all ${isEditing ? 'border border-dashed border-ios-blue/50' : 'border-transparent border'}`}>
+                                    <div className="flex justify-between items-start mb-2">
+                                        <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] font-bold uppercase">{item.type}</span>
+                                        {isEditing && (
+                                            <div className="flex gap-2">
+                                                <label className="flex items-center gap-1 cursor-pointer bg-gray-100 px-2 py-1 rounded hover:bg-gray-200">
+                                                    <input type="checkbox" checked={!!item.skipMap} onChange={(e) => updateItem(item.id, 'skipMap', e.target.checked)} className="rounded text-blue-500 focus:ring-0"/>
+                                                    <span className="text-[10px] font-bold text-gray-600">暂定</span>
+                                                </label>
+                                                <button onClick={() => { if(confirm("删除?")) onUpdateDay({...day, items: day.items.filter(i => i.id !== item.id)}) }} className="text-red-400"><Trash2 size={14}/></button>
+                                            </div>
+                                        )}
+                                    </div>
+                                    {isEditing ? <input value={item.title} onChange={e => updateItem(item.id, 'title', e.target.value)} className="w-full font-bold text-lg bg-white/50 rounded mb-1" placeholder="标题" /> : <h3 className="font-bold text-lg mb-1 flex items-center gap-2">{item.title} {item.skipMap && <span className="text-xs font-normal text-gray-400 bg-gray-100 px-1.5 rounded">暂定</span>}</h3>}
+                                    <div className="flex items-center gap-1.5 text-xs text-ios-subtext mb-3">
+                                        {item.skipMap ? <MapPinOff size={12} className="text-gray-300"/> : <MapPin size={12} className={isEditing ? "text-ios-blue" : ""}/>}
+                                        {isEditing ? <input value={item.location} onChange={e => updateItem(item.id, 'location', e.target.value)} className="bg-white/50 rounded w-full" placeholder={item.skipMap ? "暂不定位，仅做记录" : "地图搜索关键词"} disabled={item.skipMap} /> : <span className={item.skipMap ? "line-through opacity-50" : ""}>{item.location}</span>}
+                                    </div>
+                                    {isEditing ? <textarea value={item.description} onChange={e => updateItem(item.id, 'description', e.target.value)} className="w-full text-sm bg-white/50 rounded min-h-[60px]" placeholder={item.skipMap ? "在此备注暂定原因..." : "添加描述..."}/> : <p className="text-sm text-ios-subtext whitespace-pre-wrap leading-relaxed">{item.description}</p>}
+                                    <div className="mt-4 grid grid-cols-3 gap-2">
+                                        {item.images.map((img, idx) => (
+                                            <div key={idx} className="relative aspect-square rounded-lg overflow-hidden bg-gray-100"><img src={img} className="w-full h-full object-cover" />{isEditing && <button onClick={() => updateItem(item.id, 'images', item.images.filter((_, i) => i !== idx))} className="absolute top-0.5 right-0.5 bg-black/50 text-white p-0.5 rounded-full"><Trash2 size={10}/></button>}</div>
+                                        ))}
+                                        {isEditing && <button onClick={() => fileInputRefs.current[item.id]?.click()} className="aspect-square rounded-lg border-2 border-dashed flex flex-col items-center justify-center text-gray-400"><Camera size={20}/><span className="text-[10px]">添加</span></button>}
+                                        <input type="file" className="hidden" multiple accept="image/*" ref={el => fileInputRefs.current[item.id] = el} onChange={e => onImageUpload(item.id, e.target.files)} />
+                                    </div>
+                                </div>
+                            </div>
+                        </React.Fragment>
+                    ))}
+                    {isEditing && <button onClick={() => {
+                        onUpdateDay({...day, items: [...day.items, { id: Date.now().toString(), time: '18:00', title: '新活动', location: '待定', type: 'spot', images: [], skipMap: false }]});
+                    }} className="w-full py-3 rounded-2xl border-2 border-dashed text-gray-400 font-bold hover:border-ios-blue hover:text-ios-blue transition-all">+ 添加活动</button>}
+                    
+                    {/* TIME PICKER MODAL */}
+                    {timePickerTarget && (
+                        <TimePicker 
+                            value={timePickerTarget.value} 
+                            onChange={(newTime) => updateItem(timePickerTarget.id, 'time', newTime)}
+                            onClose={() => setTimePickerTarget(null)}
+                        />
+                    )}
+                </div>
+            );
+        };
+
+        const TrafficView = ({ day }) => {
+            const mapContainerRef = useRef(null);
+            const mapInstance = useRef(null);
+            const geoCache = useRef({}); 
+            const markersRef = useRef({}); // New: Store markers for clicking
+            const [status, setStatus] = useState({ total: 0, current: 0, msg: '', done: true });
+            const [validCount, setValidCount] = useState(0);
+            const [mapError, setMapError] = useState(false);
+            const [isLoading, setIsLoading] = useState(true);
+            const [resolvedCoords, setResolvedCoords] = useState({}); 
+            const [failedLocs, setFailedLocs] = useState(new Set());
+
+            useEffect(() => {
+                const initMap = async () => {
+                    try {
+                        await loadAMap();
+                        if (!window.AMap) throw new Error("AMap not found");
+                        
+                        if (!mapInstance.current && mapContainerRef.current) {
+                            mapInstance.current = new window.AMap.Map(mapContainerRef.current, { 
+                                zoom: 11, 
+                                center: [104.06, 30.67],
+                                viewMode: '2D',
+                                features: ['bg', 'road', 'building', 'point'],
+                                showLabel: true,
+                                preserveDrawingBuffer: true
+                            });
+                            mapInstance.current.addControl(new window.AMap.Scale());
+                            mapInstance.current.addControl(new window.AMap.ToolBar({ position: 'RB', offset: new window.AMap.Pixel(10, 20) }));
+                        }
+                        setIsLoading(false);
+                        updateMapMarkers();
+                    } catch(e) {
+                        console.error(e);
+                        setMapError(true);
+                        setErrorMessage(e.message);
+                        setIsLoading(false);
+                    }
+                };
+                initMap();
+            }, [day]);
+
+            const updateMapMarkers = async () => {
+                if (!mapInstance.current || !window.AMap) return;
+                const map = mapInstance.current;
+                const AMap = window.AMap;
+                map.clearMap();
+                markersRef.current = {}; // Reset markers cache
+                
+                if (!AMap.Geocoder) await new Promise(r => AMap.plugin('AMap.Geocoder', r));
+                const geocoder = new AMap.Geocoder({ city: "成都" });
+
+                const items = day.items;
+                setStatus({ total: items.length, current: 0, msg: '开始...', done: false });
+                const coords = [];
+                const newResolvedCoords = {}; 
+                const failures = new Set();
+
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    setStatus(prev => ({ ...prev, current: i + 1, msg: item.location }));
+                    
+                    if (item.skipMap) continue;
+
+                    const isVague = /(酒店|住宿|吃饭|午餐|晚餐|待定|休息|返程|睡觉|暂定)/.test(item.location) && item.location.length < 5;
+                    if (isVague) continue;
+
+                    try {
+                        let loc = null;
+                        if (geoCache.current[item.location]) {
+                            loc = geoCache.current[item.location];
+                        } else if (/^\d+(\.\d+)?,\s*\d+(\.\d+)?$/.test(item.location)) {
+                             const [lng, lat] = item.location.split(',').map(Number);
+                             loc = [lng, lat];
+                             geoCache.current[item.location] = loc;
+                        } else {
+                            await new Promise(r => setTimeout(r, 150)); 
+                            const result = await new Promise(r => geocoder.getLocation(item.location, (s, res) => r(s === 'complete' ? res : null)));
+                            if (result && result.geocodes.length) {
+                                loc = [result.geocodes[0].location.lng, result.geocodes[0].location.lat];
+                                geoCache.current[item.location] = loc; 
+                            } else {
+                                failures.add(item.id);
+                            }
+                        }
+
+                        if (loc) {
+                            coords.push(loc);
+                            newResolvedCoords[item.id] = { lng: loc[0], lat: loc[1], name: item.location }; 
+                            const content = `<div style="display:flex;flex-direction:column;align-items:center;"><div style="background:#007AFF;color:white;font-size:10px;padding:2px 6px;border-radius:6px;box-shadow:0 2px 4px rgba(0,0,0,0.2);">${i+1}.${item.title}</div><div style="width:10px;height:10px;background:#007AFF;border:2px solid white;border-radius:50%;"></div></div>`;
+                            const marker = new AMap.Marker({ 
+                                position: loc, 
+                                content, 
+                                anchor: 'bottom-center', 
+                                offset: new AMap.Pixel(0, 0), 
+                                zIndex: 100 + i 
+                            });
+                            map.add(marker);
+                            markersRef.current[item.id] = marker; // Store reference
+                        }
+                    } catch (e) { failures.add(item.id); }
+                }
+
+                if (coords.length > 1) {
+                    map.add(new AMap.Polyline({ path: coords, strokeColor: "#007AFF", strokeWeight: 8, isOutline: true, outlineColor: '#fff', showDir: true, zIndex: 50 }));
+                }
+                if (coords.length) map.setFitView(null, false, [40, 40, 40, 40]);
+                
+                setStatus(prev => ({ ...prev, done: true }));
+                setValidCount(coords.length);
+                setResolvedCoords(newResolvedCoords); 
+                setFailedLocs(failures);
+            };
+
+            const focusMarker = (id) => {
+                const marker = markersRef.current[id];
+                if (marker && mapInstance.current) {
+                    mapInstance.current.setZoomAndCenter(16, marker.getPosition());
+                }
+            };
+
+            const getNextValidIndex = (currentIndex, items) => {
+                for (let i = currentIndex + 1; i < items.length; i++) {
+                    const item = items[i];
+                    const isVague = /(酒店|住宿|吃饭|午餐|晚餐|待定|休息|返程|睡觉|暂定)/.test(item.location) && item.location.length < 5;
+                    if (!item.skipMap && !isVague && !failedLocs.has(item.id)) {
+                        return i;
+                    }
+                }
+                return -1;
+            };
+
+            const handleRetry = () => { window.location.reload(); };
+            const openFullMap = () => { const query = day.items.map(i => i.location).filter(l => l && l !== '待定').join('|'); window.open(`https://www.amap.com/search?query=${encodeURIComponent(query)}`, '_blank'); };
+            const forceCenter = () => { if(mapInstance.current) mapInstance.current.setFitView(null, false, [40, 40, 40, 40]); };
+
+            return (
+                <div className="flex flex-col w-full md:h-full">
+                    <div className="w-full h-[40vh] md:h-1/2 md:flex-1 shrink-0 relative bg-gray-100 rounded-3xl overflow-hidden shadow-inner border border-white/50 isolate group">
+                        <div ref={mapContainerRef} className="w-full h-full absolute inset-0 z-0 bg-[#f5f5f5]" />
+                        
+                        {mapError && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 bg-gray-50 z-20 p-4 text-center">
+                                <MapIcon size={48} className="mb-2 opacity-20 text-red-500" />
+                                <p className="font-bold text-lg mb-1 text-gray-700">地图加载失败</p>
+                                <div className="flex gap-2">
+                                    <button onClick={handleRetry} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 shadow-sm rounded-full text-sm font-bold text-gray-800 hover:bg-gray-100 active:scale-95 transition-all"><RefreshCw size={14} /> 重试</button>
+                                    <button onClick={openFullMap} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white shadow-sm rounded-full text-sm font-bold hover:bg-blue-700 active:scale-95 transition-all"><ExternalLink size={14} /> 打开高德</button>
+                                </div>
+                            </div>
+                        )}
+                        {isLoading && !mapError && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/80 backdrop-blur-sm z-20">
+                                <Loader2 className="w-8 h-8 text-ios-blue animate-spin mb-2" />
+                                <p className="text-xs text-ios-subtext font-medium">正在连接高德地图...</p>
+                            </div>
+                        )}
+                        <div className="absolute top-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                             <button onClick={forceCenter} className="bg-white p-2 rounded-lg shadow-md text-gray-600 hover:text-blue-600 active:scale-95 transition-transform" title="重新聚焦"><LocateFixed size={20}/></button>
+                        </div>
+                        <div className="absolute bottom-2 right-2 bg-white/80 px-2 py-1 rounded text-[10px] z-20 shadow-sm">已连接 {validCount} 点</div>
+                    </div>
+                    
+                    <div className="mt-4 px-2 md:px-4 md:pb-4 md:max-h-[25vh] md:overflow-y-auto custom-scrollbar shrink-0 bg-white z-10">
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="font-bold text-gray-400 text-xs uppercase tracking-wider">今日路线</h3>
+                            <button onClick={openFullMap} className="flex items-center gap-1 text-[10px] text-ios-blue font-bold bg-blue-50 px-2 py-1 rounded hover:bg-blue-100 transition-colors">打开高德 APP <ExternalLink size={10} /></button>
+                        </div>
+                        <div className="space-y-3 pb-8 md:pb-0">
+                            {day.items.map((item, idx) => {
+                                if (item.skipMap) return null;
+
+                                const isFailed = failedLocs.has(item.id);
+                                const nextValidIdx = getNextValidIndex(idx, day.items);
+                                const showNavButton = nextValidIdx !== -1 && !isFailed;
+                                const startCoords = resolvedCoords[item.id];
+                                const endCoords = showNavButton ? resolvedCoords[day.items[nextValidIdx].id] : null;
+                                const canNav = startCoords && endCoords;
+
+                                return (
+                                    <React.Fragment key={item.id}>
+                                        <div 
+                                            onClick={() => !isFailed && focusMarker(item.id)}
+                                            className={`flex items-center justify-between bg-white p-3 rounded-xl shadow-sm border group transition-colors cursor-pointer active:bg-blue-50 ${isFailed ? 'border-red-200 bg-red-50' : 'border-gray-100 hover:border-blue-200'} ${item.skipMap ? 'opacity-50 grayscale' : ''}`}
+                                        >
+                                            <div className="flex items-center gap-3 overflow-hidden">
+                                                <div className={`w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-xs font-bold border ${isFailed ? 'bg-red-100 text-red-600 border-red-200' : 'bg-blue-50 text-blue-600 border-blue-100'}`}>{idx + 1}</div>
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="font-bold text-sm text-gray-800 truncate flex items-center">
+                                                        {item.location} 
+                                                        {item.skipMap && <span className="text-xs font-normal text-gray-400 ml-1">(暂定)</span>}
+                                                        {isFailed && <span className="text-[10px] text-red-500 bg-red-100 px-1.5 rounded ml-2 flex items-center gap-0.5 border border-red-200"><AlertCircle size={10}/> 需修改</span>}
+                                                    </div>
+                                                    <div className={`text-xs truncate ${isFailed ? 'text-red-400' : 'text-gray-400'}`}>{isFailed ? '📍 地点未找到，请点击编辑输入正确地址' : (item.transportDetail || '前往此处')}</div>
+                                                </div>
+                                            </div>
+                                            <button onClick={(e) => { e.stopPropagation(); window.open(`https://www.amap.com/search?query=${item.location}`, '_blank'); }} className="p-2 text-blue-500 bg-blue-50 rounded-lg hover:bg-blue-100 shrink-0 transition-colors active:scale-90"><Navigation2 size={16} /></button>
+                                        </div>
+                                        
+                                        {showNavButton && canNav && (
+                                            <div className="flex justify-center -my-1.5 relative z-10">
+                                                <button 
+                                                    onClick={() => {
+                                                        const uri = `https://uri.amap.com/navigation?from=${startCoords.lng},${startCoords.lat},${startCoords.name}&to=${endCoords.lng},${endCoords.lat},${endCoords.name}&mode=car&callnative=1`;
+                                                        window.location.href = uri;
+                                                    }} 
+                                                    className="flex items-center gap-1 px-3 py-1 bg-white text-blue-600 rounded-full text-[10px] font-bold border border-blue-100 shadow-sm hover:bg-blue-50 hover:shadow-md transition-all"
+                                                >
+                                                    <ArrowDown size={10} /> 导航到下一站
+                                                </button>
+                                            </div>
+                                        )}
+                                    </React.Fragment>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [plans, setPlans] = useState([]);
+            const [activePlanIdx, setActivePlanIdx] = useState(0);
+            const [dayIdx, setDayIdx] = useState(0);
+            const [mode, setMode] = useState('schedule');
+            const [isEditing, setIsEditing] = useState(false);
+            const [menu, setMenu] = useState(null); 
+            const [showDatePicker, setShowDatePicker] = useState(false);
+            const [showTips, setShowTips] = useState(false);
+            const [currentWeather, setCurrentWeather] = useState(null); 
+            const [isExporting, setIsExporting] = useState(false);
+            const [showImportModal, setShowImportModal] = useState(false);
+            const [exportData, setExportData] = useState(null); 
+
+            const captureRef = useRef(null);
+            const exportRef = useRef(null);
+
+            useEffect(() => { setPlans(loadPlans()); }, []);
+            useEffect(() => { if (plans.length) savePlans(plans); }, [plans]);
+
+            if (!plans.length) return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin"/></div>;
+            
+            const activePlan = plans[activePlanIdx];
+            const activeDay = activePlan.days[dayIdx];
+            
+            let dateStr = "日期错误";
+            let activeDateObj = new Date();
+            try {
+                if(activePlan.startDate) {
+                    activeDateObj = new Date(new Date(activePlan.startDate).getTime() + dayIdx * 86400000);
+                    if(!isNaN(activeDateObj.getTime())) {
+                        dateStr = activeDateObj.toLocaleDateString('zh-CN', {month:'short', day:'numeric', weekday:'short'});
+                    }
+                }
+            } catch(e) {}
+
+            const updatePlanName = (name) => {
+                const newPlans = [...plans];
+                newPlans[activePlanIdx].name = name;
+                setPlans(newPlans);
+            };
+
+            // --- NEW: TRIGGER EXPORT ---
+            const triggerExport = (type) => {
+                setMenu(null);
+                if (type === 'all') {
+                    setExportData({
+                        title: '备份所有数据',
+                        desc: '包含所有行程方案，可用于恢复。',
+                        data: plans,
+                        filename: `chengdu_backup_${new Date().toISOString().slice(0,10)}.json`
+                    });
+                } else {
+                    setExportData({
+                        title: `分享: ${activePlan.name}`,
+                        desc: '仅包含当前显示的方案。',
+                        data: activePlan,
+                        filename: `plan_${activePlan.name.replace(/\s+/g, '_')}.json`
+                    });
+                }
+            };
+            
+            // --- NEW: GENERIC IMPORT PROCESSOR ---
+            const processImport = (jsonContent) => {
+                try {
+                    const parsed = typeof jsonContent === 'string' ? JSON.parse(jsonContent) : jsonContent;
+                    let newPlansToAdd = [];
+
+                    // Helper to normalize a single plan object
+                    const normalizePlan = (p) => {
+                        return {
+                            id: p.id || `p_${Date.now()}_${Math.random()}`,
+                            name: (p.name || "导入方案") + " (导入)",
+                            startDate: p.startDate || new Date().toISOString().split('T')[0],
+                            days: (p.days || []).map((d, dIdx) => ({
+                                id: d.id || `d_${Date.now()}_${dIdx}`,
+                                customTitle: d.customTitle || d.title || `Day ${dIdx+1}`,
+                                items: (d.items || []).map((i, iIdx) => ({
+                                    id: i.id || `i_${Date.now()}_${dIdx}_${iIdx}`,
+                                    // Handle both shorthand (RAW_DATA style) and full keys
+                                    time: i.time || i.t || "09:00",
+                                    title: i.title || i.tit || "未命名活动",
+                                    description: i.description || i.desc || "",
+                                    location: i.location || (i.l ? extractLocation(i.l, i.tit) : "待定"),
+                                    type: i.type || detectType(i.title||i.tit||"", i.description||i.desc||""),
+                                    transportDetail: i.transportDetail || i.trans || "",
+                                    images: i.images || [],
+                                    skipMap: i.skipMap !== undefined ? i.skipMap : false
+                                }))
+                            }))
+                        };
+                    };
+
+                    if (Array.isArray(parsed)) {
+                         if (confirm("识别到多条方案数据。点击[确定]覆盖当前所有方案，点击[取消]仅追加到现有列表。")) {
+                             setPlans(parsed.map(normalizePlan));
+                             setActivePlanIdx(0);
+                             setDayIdx(0);
+                             alert("已覆盖所有方案！");
+                             return true;
+                         } else {
+                             newPlansToAdd = parsed.map(normalizePlan);
+                         }
+                    } else if (parsed.days) {
+                        newPlansToAdd = [normalizePlan(parsed)];
+                    } else {
+                         alert("数据格式无法识别");
+                         return false;
+                    }
+
+                    if (newPlansToAdd.length > 0) {
+                        setPlans(prev => [...prev, ...newPlansToAdd]);
+                        setActivePlanIdx(plans.length); 
+                        setDayIdx(0);
+                        alert(`成功导入 ${newPlansToAdd.length} 个方案！`);
+                        return true;
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert("导入失败：数据格式错误。\n" + e.message);
+                    return false;
+                }
+            };
+
+            // --- NEW: HANDLE FILE IMPORT ---
+            const handleFileImport = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const success = processImport(event.target.result);
+                    if (success) setShowImportModal(false);
+                };
+                reader.readAsText(file);
+            };
+
+            const handleTextImport = (e) => {
+                e.preventDefault();
+                const text = e.target.elements.importText.value;
+                if (!text.trim()) return;
+                const success = processImport(text);
+                if (success) setShowImportModal(false);
+            };
+
+            // --- REVISED SCREENSHOT LOGIC ---
+            const screenshot = async () => {
+                setIsExporting(true);
+                // Wait for the render to happen
+                await new Promise(r => setTimeout(r, 800));
+
+                try {
+                    const target = exportRef.current;
+                    if (!target) throw new Error("Export container not found");
+
+                    const canvas = await window.html2canvas(target, { 
+                        scale: 2, 
+                        useCORS: true, 
+                        allowTaint: true,
+                        logging: false,
+                        backgroundColor: '#F2F2F7',
+                        width: target.offsetWidth,
+                        height: target.scrollHeight,
+                        windowWidth: target.offsetWidth,
+                        windowHeight: target.scrollHeight
+                    });
+                    
+                    const link = document.createElement('a');
+                    link.download = `行程长图-${activePlan.name}.png`;
+                    link.href = canvas.toDataURL();
+                    link.click();
+                } catch(e) { 
+                    console.error(e);
+                    alert("生成失败: " + e.message); 
+                } finally {
+                    setIsExporting(false);
+                }
+            };
+
+            const handleAddDay = () => {
+                const newPlans = [...plans];
+                newPlans[activePlanIdx].days.push({ id: Date.now(), title: `Day ${newPlans[activePlanIdx].days.length+1}`, items: [] });
+                setPlans(newPlans);
+                setDayIdx(newPlans[activePlanIdx].days.length - 1);
+            };
+
+            const handleDeleteDay = () => {
+                if (activePlan.days.length <= 1) return alert("至少保留一天！");
+                if (!confirm("删除这天的行程？")) return;
+                const newPlans = [...plans];
+                newPlans[activePlanIdx].days.splice(dayIdx, 1);
+                setPlans(newPlans);
+                setDayIdx(d => Math.max(0, d - 1));
+            };
+
+            const handleDeletePlan = () => {
+                if (plans.length <= 1) return alert("至少保留一个方案！");
+                if (!confirm(`确定要删除方案 \"${activePlan.name}\" 吗？此操作无法撤销。`)) return;
+                
+                const newPlans = plans.filter((_, i) => i !== activePlanIdx);
+                setPlans(newPlans);
+                setActivePlanIdx(prev => Math.min(prev, newPlans.length - 1));
+                setDayIdx(0);
+                setMenu(null);
+                alert("方案已删除");
+            };
+
+            const updateStartDate = (date) => {
+                if(!date) return; 
+                const newPlans = [...plans];
+                newPlans[activePlanIdx].startDate = date;
+                setPlans(newPlans);
+                setShowDatePicker(false);
+            };
+
+            // DYNAMIC TIPS LOGIC
+            const getTips = () => {
+                const tips = [];
+
+                if (currentWeather) {
+                    const { weather } = currentWeather;
+                    const maxTemp = parseInt(weather.dayTemp);
+                    const minTemp = parseInt(weather.nightTemp);
+                    const type = weather.dayWeather;
+                    let diff = maxTemp - minTemp;
+
+                    let clothingText = "";
+                    if (minTemp < 10) {
+                        clothingText = "羽绒服、厚大衣、围巾 (早晚很冷，风很大，记得多带件厚外套哦)";
+                    } else if (minTemp < 15) {
+                        clothingText = "风衣、卫衣、薄毛衣 (洋葱穿衣法，热了脱冷了穿)";
+                    } else if (minTemp < 22) {
+                        clothingText = "长袖T恤、衬衫、单裤 (舒适为主)";
+                    } else {
+                        clothingText = "短袖、裙子 (记得防晒)";
+                    }
+                    
+                    if (type.includes('雨')) {
+                        clothingText += "，记得穿防滑防水的鞋子。";
+                    }
+
+                    tips.push({ 
+                        title: "👗 穿衣推荐", 
+                        content: `${clothingText} (当前预报：${minTemp}°-${maxTemp}°)` 
+                    });
+                } else {
+                    tips.push({ title: "👗 穿衣推荐", content: "正在获取实时天气以推荐穿衣..." });
+                }
+
+                if (currentWeather && currentWeather.weather.dayWeather.includes('雨')) {
+                    tips.push({ title: "🌧️ 下雨备忘", content: "包里得常备一把轻便折叠伞，既能遮阳又能挡雨。" });
+                }
+
+                tips.push({ title: "🌶️ 成都胃", content: "如果不太能吃辣，又想试试，那我们就鸳鸯锅，实在不行唯怡豆奶解辣哈哈哈" });
+                tips.push({ title: "🐼 熊猫早起", content: "貌似看花花建议早上7:30前到南门排队，晚了只能看人头。" });
+                tips.push({ title: "👟 舒适出行", content: "行程可能要走不少路，穿双舒服的平底鞋哦。累了我们就找个茶馆坐坐？" });
+
+                return tips;
+            };
+
+            // MAIN LAYOUT WRAPPER (Target for PC screenshot - captureRef IS THE PARENT)
+            return (
+                <div className="h-screen w-full bg-[#F2F2F7] md:flex md:justify-center md:py-10">
+                    <div ref={captureRef} className="w-full h-full md:max-w-6xl md:h-[90vh] md:flex md:gap-6 md:px-6">
+                        {/* LEFT PANEL: Schedule */}
+                        <div className="w-full md:max-w-md bg-white md:rounded-[40px] relative h-full flex flex-col overflow-hidden shadow-2xl">
+                            <div className="relative z-50 p-6 pb-2 border-b border-gray-100 flex justify-between items-center ui-control bg-white">
+                                <div>
+                                    {isEditing ? (
+                                        <input 
+                                            value={activePlan.name} 
+                                            onChange={(e) => updatePlanName(e.target.value)}
+                                            className="font-bold text-xl bg-gray-50 border border-gray-200 p-1.5 -ml-1 rounded w-full max-w-[240px] text-ios-text focus:ring-2 ring-blue-500 outline-none"
+                                        />
+                                    ) : (
+                                        <div onClick={() => setMenu('plans')} className="font-bold text-xl flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 -ml-1 rounded">{activePlan.name} <ChevronRight size={16}/></div>
+                                    )}
+                                    <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                                        <button onClick={() => setDayIdx(d => Math.max(0, d-1))} disabled={dayIdx===0}><ChevronLeft size={14}/></button>
+                                        <span onClick={() => setShowDatePicker(true)} className="font-mono bg-gray-100 px-2 py-1 rounded cursor-pointer flex items-center gap-1 hover:bg-gray-200">{dateStr} <CalendarDays size={10}/></span>
+                                        <button onClick={() => setDayIdx(d => Math.min(activePlan.days.length-1, d+1))} disabled={dayIdx===activePlan.days.length-1}><ChevronRight size={14}/></button>
+                                        
+                                        {/* Strict Edit Mode Controls */}
+                                        {isEditing && (
+                                            <>
+                                                <div className="w-px h-3 bg-gray-300 mx-1"></div>
+                                                <button onClick={handleAddDay} className="text-blue-500 p-1 hover:bg-blue-50 rounded"><Plus size={14}/></button>
+                                                {activePlan.days.length > 1 && <button onClick={handleDeleteDay} className="text-red-400 p-1 hover:bg-red-50 rounded"><Trash2 size={14}/></button>}
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => setShowTips(true)} className="p-2 bg-orange-50 text-orange-500 rounded-full hover:bg-orange-100"><Lightbulb size={18}/></button>
+                                    <button onClick={() => setMode(m => m==='schedule'?'traffic':'schedule')} className="p-2 bg-gray-100 rounded-full md:hidden">{mode==='schedule'?<Map size={18}/>:<Calendar size={18}/>}</button>
+                                    <button onClick={() => setMenu('settings')} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><Settings size={18}/></button>
+                                </div>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto px-6 py-4 pb-24 md:custom-scrollbar">
+                                <div className="md:hidden">
+                                    <WeatherWidget date={activeDateObj.toISOString().split('T')[0]} onWeatherUpdate={setCurrentWeather} />
+                                    {mode === 'schedule' ? 
+                                        <ScheduleView day={activeDay} isEditing={isEditing} setIsEditing={setIsEditing} onUpdateDay={d => { const p = [...plans]; p[activePlanIdx].days[dayIdx] = d; setPlans(p); }} onImageUpload={async (id, fs) => {
+                                            const imgs = []; for(let f of fs) imgs.push(await fileToBase64(f));
+                                            const p = [...plans];
+                                            const items = p[activePlanIdx].days[dayIdx].items;
+                                            items.find(i=>i.id===id).images.push(...imgs);
+                                            setPlans(p);
+                                        }} /> 
+                                    : <TrafficView day={activeDay} />}
+                                </div>
+                                <div className="hidden md:block">
+                                     <ScheduleView day={activeDay} isEditing={isEditing} setIsEditing={setIsEditing} onUpdateDay={d => { const p = [...plans]; p[activePlanIdx].days[dayIdx] = d; setPlans(p); }} onImageUpload={async (id, fs) => {
+                                            const imgs = []; for(let f of fs) imgs.push(await fileToBase64(f));
+                                            const p = [...plans];
+                                            const items = p[activePlanIdx].days[dayIdx].items;
+                                            items.find(i=>i.id===id).images.push(...imgs);
+                                            setPlans(p);
+                                        }} />
+                                </div>
+                            </div>
+
+                            <div className="absolute bottom-6 left-0 right-0 flex justify-center ui-control pointer-events-none z-40">
+                                <button onClick={() => setIsEditing(!isEditing)} className="pointer-events-auto bg-black text-white px-6 py-3 rounded-full font-bold shadow-xl flex gap-2 items-center hover:scale-105 transition-transform">
+                                    {isEditing ? <Check size={18}/> : <Edit3 size={18}/>} {isEditing ? '完成' : '编辑'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* RIGHT PANEL: Map (PC Only) */}
+                        <div className="hidden md:flex flex-col flex-1 gap-6 h-full">
+                            <WeatherWidget date={activeDateObj.toISOString().split('T')[0]} onWeatherUpdate={setCurrentWeather} />
+                            <div className="flex-1 bg-white rounded-[40px] shadow-xl overflow-hidden p-1">
+                                <TrafficView day={activeDay} />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* HIDDEN EXPORT CONTAINER */}
+                    {isExporting && (
+                        <div className="fixed top-0 left-[-9999px] z-[-1]" ref={exportRef}>
+                            <PlanExportView plan={activePlan} />
+                        </div>
+                    )}
+                    
+                    {/* LOADING OVERLAY */}
+                    {isExporting && (
+                        <div className="fixed inset-0 z-[10002] bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center text-white">
+                            <Loader2 className="w-12 h-12 animate-spin mb-4" />
+                            <p className="font-bold text-lg">正在生成行程长图...</p>
+                            <p className="text-sm opacity-70 mt-2">包含所有天数，自动展开详情</p>
+                        </div>
+                    )}
+
+                    {/* MENUS - Z-Index 10000 (Fix Overlap) */}
+                    {menu === 'plans' && (
+                        <div className="fixed inset-0 bg-black/40 z-[10000] flex items-center justify-center p-8" onClick={() => setMenu(null)}>
+                            <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-bold text-lg">切换方案</h3>
+                                    <button onClick={() => setMenu(null)} className="p-2 bg-gray-100 rounded-full"><X size={16}/></button>
+                                </div>
+                                <div className="max-h-[60vh] overflow-y-auto space-y-2">
+                                    {plans.map((p, i) => (
+                                        <button key={p.id} onClick={() => { setActivePlanIdx(i); setDayIdx(0); setMenu(null); }} className={`w-full text-left p-4 rounded-xl font-bold transition-colors ${activePlanIdx===i ? 'bg-black text-white' : 'bg-gray-100 hover:bg-gray-200'}`}>
+                                            {p.name} <span className="text-xs font-normal opacity-60 ml-2">{p.days.length}天</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {menu === 'settings' && (
+                        <div className="fixed inset-0 bg-black/40 z-[10000] flex items-center justify-center p-8" onClick={() => setMenu(null)}>
+                            <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-3 relative" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-2">
+                                    <h3 className="font-bold text-lg">设置 & 备份</h3>
+                                    <button onClick={() => setMenu(null)} className="p-2 bg-gray-100 rounded-full"><X size={16}/></button>
+                                </div>
+                                <button onClick={() => triggerExport('current')} className="w-full flex gap-3 items-center p-4 bg-blue-50 text-blue-600 rounded-xl font-bold hover:bg-blue-100"><Share2 size={18}/> 分享当前方案 (单个)</button>
+                                <button onClick={() => triggerExport('all')} className="w-full flex gap-3 items-center p-4 bg-gray-100 rounded-xl font-bold hover:bg-gray-200"><Copy size={18}/> 备份所有数据</button>
+                                
+                                <button onClick={() => { setMenu(null); setShowImportModal(true); }} className="w-full flex gap-3 items-center p-4 bg-blue-50 text-blue-600 rounded-xl font-bold hover:bg-blue-100 border border-blue-200"><Download size={18}/> 导入方案 / 恢复备份</button>
+                                
+                                <hr className="border-gray-100"/>
+                                <button onClick={handleDeletePlan} className="w-full flex gap-3 items-center p-4 bg-red-50 text-red-500 rounded-xl font-bold hover:bg-red-100"><Trash2 size={18}/> 删除当前方案</button>
+                                <button onClick={screenshot} className="w-full flex gap-3 items-center p-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-bold hover:opacity-90 shadow-md"><Image size={18}/> 生成行程长图 (全览)</button>
+                                <button onClick={() => { if(confirm("清空所有数据？")) { localStorage.clear(); location.reload(); }}} className="w-full flex gap-3 items-center p-4 bg-gray-100 text-gray-500 rounded-xl font-bold hover:bg-gray-200"><Trash2 size={18}/> 重置所有数据</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* NEW: IMPORT MODAL */}
+                    {showImportModal && (
+                        <div className="fixed inset-0 bg-black/40 z-[10003] flex items-center justify-center p-4" onClick={() => setShowImportModal(false)}>
+                            <div className="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="font-bold text-lg flex items-center gap-2"><Download size={20}/> 导入数据</h3>
+                                    <button onClick={() => setShowImportModal(false)} className="p-2 bg-gray-100 rounded-full"><X size={16}/></button>
+                                </div>
+                                
+                                <div className="space-y-6">
+                                    {/* Option 1: File Upload (Mobile Friendly) */}
+                                    <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                                        <div className="font-bold text-blue-800 mb-2 flex items-center gap-2"><FileUp size={18}/> 方式1：上传 JSON 文件 (推荐)</div>
+                                        <p className="text-xs text-blue-600 mb-3">手机端首选！将攻略保存为 .json 文件后上传，无需复制粘贴。</p>
+                                        <label className="block w-full cursor-pointer bg-white border-2 border-dashed border-blue-300 rounded-xl p-4 text-center hover:bg-blue-50 transition-colors">
+                                            <span className="text-blue-500 font-bold">点击选择文件</span>
+                                            <input type="file" accept=".json,.txt" onChange={handleFileImport} className="hidden" />
+                                        </label>
+                                    </div>
+
+                                    <div className="flex items-center gap-4">
+                                        <div className="h-px bg-gray-200 flex-1"></div>
+                                        <span className="text-gray-400 text-xs font-bold">OR</span>
+                                        <div className="h-px bg-gray-200 flex-1"></div>
+                                    </div>
+
+                                    {/* Option 2: Paste Text (Better UI) */}
+                                    <form onSubmit={handleTextImport} className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                                        <div className="font-bold text-gray-700 mb-2 flex items-center gap-2"><FileText size={18}/> 方式2：粘贴文本</div>
+                                        <textarea name="importText" className="w-full h-32 p-3 text-xs font-mono bg-white border border-gray-200 rounded-xl focus:ring-2 ring-blue-500 outline-none resize-none" placeholder='在此粘贴 JSON 数据...'></textarea>
+                                        <button type="submit" className="w-full mt-3 bg-black text-white py-3 rounded-xl font-bold hover:opacity-80">确认导入</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* NEW: EXPORT MODAL */}
+                    {exportData && (
+                        <div className="fixed inset-0 bg-black/40 z-[10003] flex items-center justify-center p-4" onClick={() => setExportData(null)}>
+                            <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-bold text-lg">{exportData.title}</h3>
+                                    <button onClick={() => setExportData(null)} className="p-2 bg-gray-100 rounded-full"><X size={16}/></button>
+                                </div>
+                                <p className="text-sm text-gray-500 mb-6">{exportData.desc}</p>
+                                
+                                <div className="space-y-3">
+                                    <button onClick={() => {
+                                        const blob = new Blob([JSON.stringify(exportData.data, null, 2)], {type: "application/json"});
+                                        const url = URL.createObjectURL(blob);
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = exportData.filename;
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        document.body.removeChild(a);
+                                        URL.revokeObjectURL(url);
+                                        setExportData(null);
+                                    }} className="w-full flex items-center justify-center gap-2 p-4 bg-blue-50 text-blue-600 rounded-xl font-bold hover:bg-blue-100 border border-blue-200">
+                                        <FileDown size={20}/> 保存为 JSON 文件
+                                    </button>
+                                    
+                                    <button onClick={() => {
+                                        navigator.clipboard.writeText(JSON.stringify(exportData.data));
+                                        alert("已复制到剪贴板！");
+                                        setExportData(null);
+                                    }} className="w-full flex items-center justify-center gap-2 p-4 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200">
+                                        <Copy size={20}/> 复制文本内容
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* DYNAMIC TIPS MODAL */}
+                    {showTips && (
+                        <div className="fixed inset-0 bg-black/40 z-[10000] flex items-center justify-center p-8" onClick={() => setShowTips(false)}>
+                            <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative animate-[fadeIn_0.2s_ease-out]" onClick={e => e.stopPropagation()}>
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="font-bold text-lg flex items-center gap-2">💡 贴心小建议</h3>
+                                    <button onClick={() => setShowTips(false)} className="p-2 bg-gray-100 rounded-full"><X size={16}/></button>
+                                </div>
+                                <div className="space-y-3 text-sm text-gray-600 leading-relaxed">
+                                    {getTips().map((tip, i) => (
+                                        <div key={i} className={`p-3 rounded-xl border ${i%3===0?'bg-orange-50 border-orange-100 text-orange-800':i%3===1?'bg-blue-50 border-blue-100 text-blue-800':'bg-green-50 border-green-100 text-green-800'}`}>
+                                            <span className="font-bold block mb-1">{tip.title}</span>
+                                            {tip.content}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* DATE PICKER */}
+                    {showDatePicker && (
+                        <div className="fixed inset-0 bg-black/40 z-[10000] flex items-center justify-center p-8" onClick={() => setShowDatePicker(false)}>
+                            <div className="bg-white w-full max-w-xs rounded-3xl p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+                                <button onClick={() => setShowDatePicker(false)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full"><X size={14}/></button>
+                                <h3 className="font-bold text-lg mb-4">设置出发日期</h3>
+                                <input type="date" value={activePlan.startDate || ''} onChange={(e) => updateStartDate(e.target.value)} className="w-full p-4 bg-gray-100 rounded-xl font-bold outline-none focus:ring-2 ring-blue-500" />
+                                <p className="text-xs text-gray-400 mt-2">修改后，后续行程会自动顺延。</p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
