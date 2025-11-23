@@ -180,7 +180,7 @@
             {"id":"p_citywalk_autumn","name":"M: 🍂 银杏红叶Citywalk散步指南","days":[
                 {"title":"金色老街巷弄一日漫步","items":[
                     {"t":"10:00","tit":"望江楼公园","desc":"以清幽古雅的氛围开启一天的漫步。这里有标志性的红墙竹影，在秋天与金黄的银杏交织，古风氛围感十足。","l":"望江楼公园","trans":"🚗 打车或公交直达","imgs":[],"lt":"","type":"spot"},
-                    {"t":"12:30","tit":"午餐：银杏路周边","desc":"在前往银杏路的途中或附近找一家安静的餐厅或咖啡馆，享受休闲的午餐时光。","l":"银杏路（周边餐厅）","trans":"🚶 步行","imgs":[],"lt":"","type":"food"},
+                    {"t":"12:30","tit":"午餐：银杏路周边","desc":"在前往银杏路的途中或附近找一家安静的餐厅或咖啡馆，享受休闲的午餐时光。","l":"银杏路（周边餐厅）","trans":"🚶步行","imgs":[],"lt":"","type":"food"},
                     {"t":"14:00","tit":"银杏路漫步","desc":"整条街被金黄的银杏叶覆盖，美到发光。建议放慢脚步，感受落叶不扫的浪漫，踩上去沙沙作响。","l":"银杏路","trans":"🚶 步行","imgs":[],"lt":"","type":"spot"},
                     {"t":"15:30","tit":"百花巷探秘","desc":"小众且充满生活气息的巷子，屋檐下挂满藤蔓秋叶。在这里可以偶遇晒太阳的猫猫，体验老成都的慢生活。","l":"百花巷","trans":"🚶 步行","imgs":[],"lt":"","type":"spot"},
                     {"t":"16:30","tit":"锦绣桥赏景","desc":"桥边的梧桐叶与银杏叶形成双拼色景观，视觉效果极佳。笔记中提到下午4点光影绝美，是绝佳的拍照时间。","l":"锦绣桥","trans":"🚶 步行","imgs":[],"lt":"","type":"spot"},
@@ -214,8 +214,20 @@
         }));
 
         const STORAGE_KEY = 'chengdu_love_trip_data_v29';
+        // NEW: 地图持久化存储键
+        const MAP_HISTORY_KEY = 'chengdu_map_history_v29';
+        const GEO_CACHE_KEY = 'chengdu_geo_cache_v29';
+        
         const savePlans = (plans) => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(plans)); } catch (e) { console.error("Storage error"); } };
         const loadPlans = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || DEFAULT_PLANS; } catch { return DEFAULT_PLANS; } };
+        
+        // NEW: 地图历史和缓存的加载/保存函数
+        const loadMapHistory = () => { try { return JSON.parse(localStorage.getItem(MAP_HISTORY_KEY)) || {}; } catch { return {}; } };
+        const saveMapHistory = (history) => { try { localStorage.setItem(MAP_HISTORY_KEY, JSON.stringify(history)); } catch (e) { console.error("Map history storage error"); } };
+        
+        const loadGeoCache = () => { try { return JSON.parse(localStorage.getItem(GEO_CACHE_KEY)) || {}; } catch { return {}; } };
+        const saveGeoCache = (cache) => { try { localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(cache)); } catch (e) { console.error("Geo cache storage error"); } };
+        
         const fileToBase64 = (file) => new Promise((resolve) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.readAsDataURL(file); });
 
         // --- UTILS: AMAP ---
@@ -974,22 +986,19 @@
             );
         };
 
-        const TrafficView = ({ day, showStatus, mapLoadHistory, updateMapLoadHistory }) => {
+        const TrafficView = ({ day, showStatus, mapLoadHistory, updateMapLoadHistory, geoCache, updateGeoCache }) => {
             const mapContainerRef = useRef(null);
             const mapInstance = useRef(null);
-            const geoCache = useRef({}); 
-            const markersRef = useRef({}); // New: Store markers for clicking
-            // 移除内部的 status 状态，转而依赖 showStatus
+            // 移除 useRef(geoCache) 改为使用 props 中的 geoCache
+            const markersRef = useRef({}); 
             const [validCount, setValidCount] = useState(0);
             const [mapError, setMapError] = useState(false);
             const [isLoading, setIsLoading] = useState(true);
             const [resolvedCoords, setResolvedCoords] = useState({}); 
             const [failedLocs, setFailedLocs] = useState(new Set());
 
-            // NEW: 地图加载/绘制超时计时器
             const mapTimeoutRef = useRef(null);
             
-            // 增强模糊地点识别关键词列表
             const VAGUE_LOCATION_KEYWORDS = [
                 '酒店', '住宿', '吃饭', '午餐', '晚餐', '早餐', '休息', '返程', '待定', '暂定', '随便找家'
             ];
@@ -1006,67 +1015,65 @@
                 if (message && showStatus) showStatus(message);
             };
 
-            // NEW: 获取当前方案和日期的唯一键
             const getCurrentDayKey = () => `${day.id}`;
 
 
             useEffect(() => {
                 const initMap = async () => {
-                    // 1. 检查是否已加载过地图，如果已加载且当前没有修改，则跳过耗时操作
                     const currentDayKey = getCurrentDayKey();
                     const isLoaded = mapLoadHistory[currentDayKey];
 
-                    if (isLoaded) {
-                        // 如果已加载过，仅清理地图并重新添加缓存的标记和路线（如果存在）
-                        // 注意：这里需要确保 mapInstance.current 已经存在
-                        if (mapInstance.current) {
-                            mapInstance.current.clearMap();
-                            
-                            const cachedCoords = isLoaded.coords;
-                            const cachedResolvedCoords = isLoaded.resolvedCoords;
-                            const cachedFailedLocs = isLoaded.failedLocs;
-                            
-                            setValidCount(cachedCoords.length);
-                            setResolvedCoords(cachedResolvedCoords); 
-                            setFailedLocs(cachedFailedLocs);
-
-                            const AMap = window.AMap;
-                            
-                            // 重新添加标记和路线
-                            cachedCoords.forEach((loc, index) => {
-                                const item = day.items.find(i => cachedResolvedCoords[i.id] && cachedResolvedCoords[i.id].lng === loc[0]);
-                                if (item) {
-                                    const content = `<div style="display:flex;flex-direction:column;align-items:center;"><div style="background:#007AFF;color:white;font-size:10px;padding:2px 6px;border-radius:6px;box-shadow:0 2px 4px rgba(0,0,0,0.2);">${index+1}.${item.title}</div><div style="width:10px;height:10px;background:#007AFF;border:2px solid white;border-radius:50%;"></div></div>`;
-                                    const marker = new AMap.Marker({ 
-                                        position: loc, 
-                                        content, 
-                                        anchor: 'bottom-center', 
-                                        offset: new AMap.Pixel(0, 0), 
-                                        zIndex: 100 + index 
-                                    });
-                                    mapInstance.current.add(marker);
-                                    markersRef.current[item.id] = marker; 
-                                }
-                            });
-                            
-                            if (cachedCoords.length > 1) {
-                                mapInstance.current.add(new AMap.Polyline({ path: cachedCoords, strokeColor: "#007AFF", strokeWeight: 8, isOutline: true, outlineColor: '#fff', showDir: true, zIndex: 50 }));
-                            }
-                            if (cachedCoords.length) mapInstance.current.setFitView(null, false, [40, 40, 40, 40]);
-                            
-                            setIsLoading(false);
-                        } else {
-                            // 首次加载地图实例，需执行完整流程
-                            await initializeAndDrawMap();
-                        }
+                    // 1. 如果已加载过，且当前地图实例已存在，则从缓存中恢复
+                    if (isLoaded && mapInstance.current) {
+                        restoreMapFromCache(isLoaded);
                         return;
                     }
                     
-                    // 2. 如果未加载过，则执行完整流程
-                    await initializeAndDrawMap();
+                    // 2. 如果是首次加载（mapInstance.current 不存在）或需要重新绘制 (isLoaded=false)
+                    await initializeAndDrawMap(isLoaded);
                 };
+                
+                const restoreMapFromCache = (isLoaded) => {
+                    mapInstance.current.clearMap();
+                    
+                    const cachedCoords = isLoaded.coords;
+                    const cachedResolvedCoords = isLoaded.resolvedCoords;
+                    const cachedFailedLocs = isLoaded.failedLocs;
+                    
+                    setValidCount(cachedCoords.length);
+                    setResolvedCoords(cachedResolvedCoords); 
+                    setFailedLocs(new Set(cachedFailedLocs)); // 注意：Set需要重新构造
 
-                const initializeAndDrawMap = async () => {
+                    const AMap = window.AMap;
+                    
+                    // 重新添加标记和路线
+                    cachedCoords.forEach((loc, index) => {
+                        // 查找对应的 item，以便获取 title
+                        const item = day.items.find(i => cachedResolvedCoords[i.id] && cachedResolvedCoords[i.id].lng === loc[0] && cachedResolvedCoords[i.id].lat === loc[1]);
+                        if (item) {
+                            const content = `<div style="display:flex;flex-direction:column;align-items:center;"><div style="background:#007AFF;color:white;font-size:10px;padding:2px 6px;border-radius:6px;box-shadow:0 2px 4px rgba(0,0,0,0.2);">${index+1}.${item.title}</div><div style="width:10px;height:10px;background:#007AFF;border:2px solid white;border-radius:50%;"></div></div>`;
+                            const marker = new AMap.Marker({ 
+                                position: loc, 
+                                content, 
+                                anchor: 'bottom-center', 
+                                offset: new AMap.Pixel(0, 0), 
+                                zIndex: 100 + index 
+                            });
+                            mapInstance.current.add(marker);
+                            markersRef.current[item.id] = marker; 
+                        }
+                    });
+                    
+                    if (cachedCoords.length > 1) {
+                        mapInstance.current.add(new AMap.Polyline({ path: cachedCoords, strokeColor: "#007AFF", strokeWeight: 8, isOutline: true, outlineColor: '#fff', showDir: true, zIndex: 50 }));
+                    }
+                    if (cachedCoords.length) mapInstance.current.setFitView(null, false, [40, 40, 40, 40]);
+                    
+                    setIsLoading(false);
+                }
+
+
+                const initializeAndDrawMap = async (isLoaded) => {
                     try {
                         mapTimeoutRef.current = setTimeout(() => {
                             clearMapLoading("🚨 地图初始化超时，请尝试刷新页面。");
@@ -1090,8 +1097,16 @@
                             mapInstance.current.addControl(new window.AMap.ToolBar({ position: 'RB', offset: new window.AMap.Pixel(10, 20) }));
                         }
                         setIsLoading(false);
-                        // 执行完整的标记更新和绘制
-                        await updateMapMarkers(true); // 传入 true 表示是首次/强制绘制，需要提示
+                        
+                        // 只有在未加载过或需要重新绘制时，才执行完整的标记更新和绘制
+                        if (!isLoaded || isLoaded === false) {
+                             await updateMapMarkers(true); // 传入 true 表示是首次/强制绘制，需要提示
+                        } else if (mapInstance.current) {
+                            // 地图实例已存在，但切换回此页面，只需从缓存恢复
+                            restoreMapFromCache(isLoaded);
+                        }
+
+
                     } catch(e) {
                         console.error(e);
                         setMapError(true);
@@ -1101,7 +1116,7 @@
 
                 initMap();
 
-                // 清理函数，防止内存泄漏和旧地图残留
+                // 清理函数
                 return () => {
                     clearTimeout(mapTimeoutRef.current);
                     if (mapInstance.current) {
@@ -1169,12 +1184,13 @@
                         let loc = null;
                         let result = null;
 
-                        if (geoCache.current[item.location]) {
-                            loc = geoCache.current[item.location];
+                        // 使用持久化缓存
+                        if (geoCache[item.location]) {
+                            loc = geoCache[item.location];
                         } else if (/^\d+(\.\d+)?,\s*\d+(\.\d+)?$/.test(item.location)) {
                              const [lng, lat] = item.location.split(',').map(Number);
                              loc = [lng, lat];
-                             geoCache.current[item.location] = loc;
+                             updateGeoCache(item.location, loc);
                         } else {
                             // 增加延迟
                             await new Promise(r => setTimeout(r, 150)); 
@@ -1191,7 +1207,7 @@
                             
                             if (result && result.geocodes.length) {
                                 loc = [result.geocodes[0].location.lng, result.geocodes[0].location.lat];
-                                geoCache.current[item.location] = loc; 
+                                updateGeoCache(item.location, loc); // 更新持久化缓存
                             } else {
                                 // 识别失败：标记并跳过
                                 failures.add(item.id);
@@ -1235,12 +1251,12 @@
                 setResolvedCoords(newResolvedCoords); 
                 setFailedLocs(failures);
 
-                // 更新历史记录
+                // 更新历史记录 (存储所有必要数据用于下次快速恢复)
                 updateMapLoadHistory(getCurrentDayKey(), {
                     isLoaded: true,
                     coords: coords,
                     resolvedCoords: newResolvedCoords,
-                    failedLocs: failures
+                    failedLocs: Array.from(failures)
                 });
 
                 // 最终状态提示 (仅在需要时显示)
@@ -1338,7 +1354,7 @@
                                                 <div className="min-w-0 flex-1">
                                                     <div className="font-bold text-sm text-gray-800 truncate flex items-center">
                                                         {item.location} 
-                                                        {isFailed && <span className="text-[10px] text-red-500 bg-red-100 px-1.5 rounded ml-2 flex items-center gap-0.5 border border-red-200"><AlertCircle size={10}/> 需修改或在编辑里设置为"暂定"</span>}
+                                                        {isFailed && <span className="text-[10px] text-red-500 bg-red-100 px-1.5 rounded ml-2 flex items-center gap-0.5 border border-red-200"><AlertCircle size={10}/> 需修改</span>}
                                                     </div>
                                                     <div className={`text-xs truncate ${isFailed ? 'text-red-400' : 'text-gray-400'}`}>{isFailed ? '📍 地点未找到，请点击编辑输入正确地址' : (item.transportDetail || '前往此处')}</div>
                                                 </div>
@@ -1492,8 +1508,10 @@
             const [showImportModal, setShowImportModal] = useState(false);
             const [exportData, setExportData] = useState(null); 
             const [dayDataToImport, setDayDataToImport] = useState(null); // NEW: State for single day import
-            // NEW: 地图加载历史记录，用于避免重复加载
-            const [mapLoadHistory, setMapLoadHistory] = useState({}); 
+            
+            // NEW: 地图加载历史和地理编码缓存状态
+            const [mapLoadHistory, setMapLoadHistory] = useState(loadMapHistory()); 
+            const [geoCache, setGeoCache] = useState(loadGeoCache());
 
             const captureRef = useRef(null);
             const exportRef = useRef(null);
@@ -1504,10 +1522,24 @@
                 setTimeout(() => setStatusMessage(null), 3500); 
             };
 
-            // NEW: 更新地图加载历史记录
+            // NEW: 更新地图加载历史记录并持久化
             const updateMapLoadHistory = (key, data) => {
-                setMapLoadHistory(prev => ({ ...prev, [key]: data }));
+                setMapLoadHistory(prev => {
+                    const newState = { ...prev, [key]: data };
+                    saveMapHistory(newState);
+                    return newState;
+                });
             };
+            
+            // NEW: 更新地理编码缓存并持久化
+            const updateGeoCache = (key, data) => {
+                setGeoCache(prev => {
+                    const newState = { ...prev, [key]: data };
+                    saveGeoCache(newState);
+                    return newState;
+                });
+            };
+
 
             // Helper function to sort items by time (HH:MM format)
             const sortDayItems = (day) => {
@@ -1534,7 +1566,7 @@
                     setMapLoadHistory(prev => ({ ...prev, [currentDayKey]: false }));
                     // 只有在地图模式下，才立即触发重绘提示
                     if (mode === 'traffic') {
-                        showStatus("🔄 行程内容已更改，地图将在下一次切换时重新绘制。");
+                        showStatus("🔄 行程内容已更改，地图将在下次切换/手动刷新时重新绘制。");
                     }
                 }
             };
@@ -1976,6 +2008,8 @@
                                         showStatus={showStatus} 
                                         mapLoadHistory={mapLoadHistory} 
                                         updateMapLoadHistory={updateMapLoadHistory}
+                                        geoCache={geoCache}
+                                        updateGeoCache={updateGeoCache}
                                     />}
                                 </div>
                                 <div className="hidden md:block">
@@ -2009,6 +2043,8 @@
                                     showStatus={showStatus} 
                                     mapLoadHistory={mapLoadHistory} 
                                     updateMapLoadHistory={updateMapLoadHistory}
+                                    geoCache={geoCache}
+                                    updateGeoCache={updateGeoCache}
                                 />
                             </div>
                         </div>
