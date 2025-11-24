@@ -1565,7 +1565,7 @@
                                 </div>
                             </div>
 
-                            <div className="absolute bottom-6 left-0 right-0 flex justify-center ui-control pointer-events-none z-40">
+                            <div className={`absolute bottom-6 left-0 right-0 justify-center ui-control pointer-events-none z-40 ${mode === 'traffic' ? 'hidden md:flex' : 'flex'}`}>
                                 <button onClick={() => setIsEditing(!isEditing)} className="pointer-events-auto bg-black text-white px-6 py-3 rounded-full font-bold shadow-xl flex gap-2 items-center hover:scale-105 transition-transform">
                                     {isEditing ? <Check size={18}/> : <Edit3 size={18}/>} {isEditing ? '完成' : '编辑'}
                                 </button>
