@@ -928,7 +928,7 @@
             );
         };
 
-        // 优化后的 TrafficView：编辑期间绝对静默，退出编辑才刷新地图
+        // 优化后的 TrafficView：添加手动刷新按钮，优化手机端按钮显示
         const TrafficView = ({ day, showStatus, mapLoadHistory, updateMapLoadHistory, geoCache, updateGeoCache, isEditing }) => {
             const mapContainerRef = useRef(null);
             const mapInstance = useRef(null);
@@ -940,8 +940,6 @@
             const [failedLocs, setFailedLocs] = useState(new Set());
             const mapTimeoutRef = useRef(null);
             
-            // 1. 生成路由签名：只包含影响地图绘制的核心字段 (ID, Location, SkipMap)
-            // 修改标题、时间、交通备注等不会改变签名，也就不会触发地图刷新
             const routeSignature = day.items.map(i => `${i.id}|${i.location}|${i.skipMap}`).join('||');
 
             const VAGUE_LOCATION_KEYWORDS = ['酒店', '住宿', '吃饭', '午餐', '晚餐', '早餐', '休息', '返程', '待定', '暂定', '随便找家'];
@@ -959,17 +957,13 @@
             };
             const getCurrentDayKey = () => `${day.id}`;
 
-            // --- 核心逻辑 ---
             useEffect(() => {
-                // 【关键】：如果是编辑模式，直接中断，不做任何地图更新/请求
                 if (isEditing) return;
 
                 const initMap = async () => {
                     const currentDayKey = getCurrentDayKey();
                     const isLoaded = mapLoadHistory[currentDayKey];
-                    // 如果缓存还在，且地图实例存在，直接恢复（不费流量）
                     if (isLoaded && mapInstance.current) { restoreMapFromCache(isLoaded); return; }
-                    // 否则重新绘制
                     await initializeAndDrawMap(isLoaded);
                 };
                 
@@ -1016,8 +1010,6 @@
 
                 initMap();
                 return () => { clearTimeout(mapTimeoutRef.current); if (mapInstance.current) { mapInstance.current.clearMap(); } };
-                
-                // 依赖项：只有当 [路线签名改变] 且 [编辑状态解除] 时，才会触发上述逻辑
             }, [routeSignature, isEditing]); 
 
             const geocodeWithTimeout = (geocoder, location, timeout = 5000) => {
@@ -1052,7 +1044,6 @@
                     try {
                         let loc = null;
                         let result = null;
-                        // 优先读缓存
                         if (geoCache[item.location]) { loc = geoCache[item.location]; } else if (/^\d+(\.\d+)?,\s*\d+(\.\d+)?$/.test(item.location)) {
                              const [lng, lat] = item.location.split(',').map(Number); loc = [lng, lat]; updateGeoCache(item.location, loc);
                         } else {
@@ -1092,6 +1083,8 @@
                 <div className="flex flex-col w-full md:h-full">
                     <div className="w-full h-[40vh] md:h-1/2 md:flex-1 shrink-0 relative bg-gray-100 rounded-3xl overflow-hidden shadow-inner border border-white/50 isolate group">
                         <div ref={mapContainerRef} className="w-full h-full absolute inset-0 z-0 bg-[#f5f5f5]" />
+                        
+                        {/* 1. 错误提示区域 */}
                         {mapError && (
                             <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500 bg-gray-50 z-20 p-4 text-center">
                                 <MapIcon size={48} className="mb-2 opacity-20 text-red-500" />
@@ -1102,15 +1095,26 @@
                                 </div>
                             </div>
                         )}
+
+                        {/* 2. Loading 状态 */}
                         {isLoading && !mapError && (
                             <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/80 backdrop-blur-sm z-20">
                                 <Loader2 className="w-8 h-8 text-ios-blue animate-spin mb-2" />
                                 <p className="text-xs text-ios-subtext font-medium">正在连接高德地图...</p>
                             </div>
                         )}
-                        <div className="absolute top-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-                             <button onClick={forceCenter} className="bg-white p-2 rounded-lg shadow-md text-gray-600 hover:text-blue-600 active:scale-95 transition-transform" title="重新聚焦"><LocateFixed size={20}/></button>
+
+                        {/* 3. 地图控制按钮组 (新增：刷新按钮) */}
+                        {/* 修改了样式：opacity-100 表示默认显示，md:opacity-0 表示电脑端默认隐藏(悬停显示) */}
+                        <div className="absolute top-4 right-4 z-10 flex flex-col gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                             <button onClick={handleRetry} className="bg-white p-2 rounded-lg shadow-md text-gray-600 hover:text-blue-600 active:scale-95 transition-transform" title="强制刷新地图">
+                                <RefreshCw size={20}/>
+                             </button>
+                             <button onClick={forceCenter} className="bg-white p-2 rounded-lg shadow-md text-gray-600 hover:text-blue-600 active:scale-95 transition-transform" title="重新聚焦">
+                                <LocateFixed size={20}/>
+                             </button>
                         </div>
+
                         <div className="absolute bottom-2 right-2 bg-white/80 px-2 py-1 rounded text-[10px] z-20 shadow-sm">已连接 {validCount} 点</div>
                     </div>
                     
