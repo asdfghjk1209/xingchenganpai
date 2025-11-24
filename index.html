@@ -928,7 +928,8 @@
             );
         };
 
-        const TrafficView = ({ day, showStatus, mapLoadHistory, updateMapLoadHistory, geoCache, updateGeoCache }) => {
+        // 优化后的 TrafficView：编辑期间绝对静默，退出编辑才刷新地图
+        const TrafficView = ({ day, showStatus, mapLoadHistory, updateMapLoadHistory, geoCache, updateGeoCache, isEditing }) => {
             const mapContainerRef = useRef(null);
             const mapInstance = useRef(null);
             const markersRef = useRef({}); 
@@ -938,6 +939,11 @@
             const [resolvedCoords, setResolvedCoords] = useState({}); 
             const [failedLocs, setFailedLocs] = useState(new Set());
             const mapTimeoutRef = useRef(null);
+            
+            // 1. 生成路由签名：只包含影响地图绘制的核心字段 (ID, Location, SkipMap)
+            // 修改标题、时间、交通备注等不会改变签名，也就不会触发地图刷新
+            const routeSignature = day.items.map(i => `${i.id}|${i.location}|${i.skipMap}`).join('||');
+
             const VAGUE_LOCATION_KEYWORDS = ['酒店', '住宿', '吃饭', '午餐', '晚餐', '早餐', '休息', '返程', '待定', '暂定', '随便找家'];
             
             const isVagueLocation = (location) => {
@@ -945,6 +951,7 @@
                 const normalized = location.toLowerCase().trim();
                 return VAGUE_LOCATION_KEYWORDS.some(keyword => normalized.includes(keyword)) && normalized.length < 5;
             };
+
             const clearMapLoading = (message) => {
                 clearTimeout(mapTimeoutRef.current);
                 setIsLoading(false);
@@ -952,11 +959,17 @@
             };
             const getCurrentDayKey = () => `${day.id}`;
 
+            // --- 核心逻辑 ---
             useEffect(() => {
+                // 【关键】：如果是编辑模式，直接中断，不做任何地图更新/请求
+                if (isEditing) return;
+
                 const initMap = async () => {
                     const currentDayKey = getCurrentDayKey();
                     const isLoaded = mapLoadHistory[currentDayKey];
+                    // 如果缓存还在，且地图实例存在，直接恢复（不费流量）
                     if (isLoaded && mapInstance.current) { restoreMapFromCache(isLoaded); return; }
+                    // 否则重新绘制
                     await initializeAndDrawMap(isLoaded);
                 };
                 
@@ -1003,7 +1016,9 @@
 
                 initMap();
                 return () => { clearTimeout(mapTimeoutRef.current); if (mapInstance.current) { mapInstance.current.clearMap(); } };
-            }, [day]); 
+                
+                // 依赖项：只有当 [路线签名改变] 且 [编辑状态解除] 时，才会触发上述逻辑
+            }, [routeSignature, isEditing]); 
 
             const geocodeWithTimeout = (geocoder, location, timeout = 5000) => {
                 return new Promise((resolve, reject) => {
@@ -1030,28 +1045,28 @@
                 
                 for (let i = 0; i < items.length; i++) {
                     const item = items[i];
-                    if (isVagueLocation(item.location)) { if (shouldShowToast && showStatus) showStatus(`⚠️ 未检测到精确地址: ${item.location} (模糊地点已跳过)`); failures.add(item.id); continue; }
+                    if (isVagueLocation(item.location)) { failures.add(item.id); continue; } 
                     if (item.skipMap) continue; 
                     if (shouldShowToast && showStatus) showStatus(`🔍 正在检查第 ${i + 1} 个地点: ${item.location}`);
 
                     try {
                         let loc = null;
                         let result = null;
+                        // 优先读缓存
                         if (geoCache[item.location]) { loc = geoCache[item.location]; } else if (/^\d+(\.\d+)?,\s*\d+(\.\d+)?$/.test(item.location)) {
                              const [lng, lat] = item.location.split(',').map(Number); loc = [lng, lat]; updateGeoCache(item.location, loc);
                         } else {
                             await new Promise(r => setTimeout(r, 150)); 
-                            try { result = await geocodeWithTimeout(geocoder, item.location, 5000); } catch (error) { failures.add(item.id); if (shouldShowToast && showStatus) showStatus(`⌛ 超时：${item.location} 在 5 秒内未响应，已跳过。`); continue; }
-                            if (result && result.geocodes.length) { loc = [result.geocodes[0].location.lng, result.geocodes[0].location.lat]; updateGeoCache(item.location, loc); } else { failures.add(item.id); if (shouldShowToast && showStatus) showStatus(`⚠️ 未检测到精确地址: ${item.location}。请手动修改！`); continue; }
+                            try { result = await geocodeWithTimeout(geocoder, item.location, 5000); } catch (error) { failures.add(item.id); continue; }
+                            if (result && result.geocodes.length) { loc = [result.geocodes[0].location.lng, result.geocodes[0].location.lat]; updateGeoCache(item.location, loc); } else { failures.add(item.id); continue; }
                         }
                         if (loc) {
                             coords.push(loc); newResolvedCoords[item.id] = { lng: loc[0], lat: loc[1], name: item.location }; 
                             const content = `<div style="display:flex;flex-direction:column;align-items:center;"><div style="background:#007AFF;color:white;font-size:10px;padding:2px 6px;border-radius:6px;box-shadow:0 2px 4px rgba(0,0,0,0.2);">${coords.length}.${item.title}</div><div style="width:10px;height:10px;background:#007AFF;border:2px solid white;border-radius:50%;"></div></div>`;
                             const marker = new AMap.Marker({ position: loc, content, anchor: 'bottom-center', offset: new AMap.Pixel(0, 0), zIndex: 100 + i });
                             map.add(marker); markersRef.current[item.id] = marker; 
-                            if (shouldShowToast && showStatus) showStatus(`📍 已绘制: ${item.location}`); 
                         }
-                    } catch (e) { console.error(`Error processing item ${item.id}:`, e); failures.add(item.id); if (shouldShowToast && showStatus) showStatus(`⚠️ 绘制 ${item.location} 时遇到系统错误，已跳过。`); continue; }
+                    } catch (e) { console.error(`Error processing item ${item.id}:`, e); failures.add(item.id); continue; }
                 }
                 
                 if (coords.length > 1) { map.add(new AMap.Polyline({ path: coords, strokeColor: "#007AFF", strokeWeight: 8, isOutline: true, outlineColor: '#fff', showDir: true, zIndex: 50 })); }
@@ -1059,7 +1074,10 @@
                 setValidCount(coords.length); setResolvedCoords(newResolvedCoords); setFailedLocs(failures);
                 updateMapLoadHistory(getCurrentDayKey(), { isLoaded: true, coords: coords, resolvedCoords: newResolvedCoords, failedLocs: Array.from(failures) });
 
-                if (shouldShowToast && failures.size > 0 && showStatus) { showStatus(`💪 已完成地图加载，但有 ${failures.size} 个地点未识别。请点击路线列表中的红色“需修改”手动完善，让你的地图更完美哦！`); } else if (shouldShowToast && coords.length > 0 && showStatus) { showStatus("✅ 路线图已成功生成！祝你玩得开心！"); } else if (shouldShowToast && showStatus) { showStatus("🤔 本日暂无有效地点可供地图规划。"); }
+                if (shouldShowToast && showStatus) {
+                    if (coords.length > 0) showStatus("✅ 地图已根据最新行程更新");
+                    else showStatus("⚠️ 未找到有效地点，请检查地址输入");
+                }
             };
 
             const focusMarker = (id) => { const marker = markersRef.current[id]; if (marker && mapInstance.current) { mapInstance.current.setZoomAndCenter(16, marker.getPosition()); } };
@@ -1117,7 +1135,7 @@
                                             <div className="flex items-center gap-3 overflow-hidden">
                                                 <div className={`w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-xs font-bold border ${isFailed ? 'bg-red-100 text-red-600 border-red-200' : 'bg-blue-50 text-blue-600 border-blue-100'}`}>{idx + 1}</div>
                                                 <div className="min-w-0 flex-1">
-                                                    <div className="font-bold text-sm text-gray-800 truncate flex items-center">{item.location} {isFailed && <span className="text-[10px] text-red-500 bg-red-100 px-1.5 rounded ml-2 flex items-center gap-0.5 border border-red-200"><AlertCircle size={10}/> 需检查地点是否正确或者在编辑处选择"暂定"</span>}</div>
+                                                    <div className="font-bold text-sm text-gray-800 truncate flex items-center">{item.location} {isFailed && <span className="text-[10px] text-red-500 bg-red-100 px-1.5 rounded ml-2 flex items-center gap-0.5 border border-red-200"><AlertCircle size={10}/> 需检查地点</span>}</div>
                                                     <div className={`text-xs truncate ${isFailed ? 'text-red-400' : 'text-gray-400'}`}>{isFailed ? '📍 地点未找到，请点击编辑输入正确地址' : (item.transportDetail || '前往此处')}</div>
                                                 </div>
                                             </div>
@@ -1217,6 +1235,16 @@
             const captureRef = useRef(null);
             const exportRef = useRef(null);
 
+            const getGreeting = () => {
+                const hour = new Date().getHours();
+                if (hour < 5) return "夜深了";
+                if (hour < 9) return "早上好";
+                if (hour < 12) return "上午好";
+                if (hour < 14) return "中午好";
+                if (hour < 19) return "下午好";
+                return "晚上好";
+            };
+
             const showStatus = (msg) => { setStatusMessage(msg); setTimeout(() => setStatusMessage(null), 3500); };
             const updateMapLoadHistory = (key, data) => { setMapLoadHistory(prev => { const newState = { ...prev, [key]: data }; saveMapHistory(newState); return newState; }); };
             const updateGeoCache = (key, data) => { setGeoCache(prev => { const newState = { ...prev, [key]: data }; saveGeoCache(newState); return newState; }); };
@@ -1226,14 +1254,27 @@
                 return { ...day, items: newItems };
             };
 
+            // 优化后的更新函数：只在地点/排序实质变化时清空地图缓存
             const handleUpdateDay = (updatedDay) => {
                 const newPlans = [...plans];
+                const oldDay = newPlans[activePlanIdx].days[dayIdx];
                 newPlans[activePlanIdx].days[dayIdx] = sortDayItems(updatedDay);
                 setPlans(newPlans);
-                const currentDayKey = `${newPlans[activePlanIdx].days[dayIdx].id}`;
-                if (mapLoadHistory[currentDayKey]) {
-                    setMapLoadHistory(prev => ({ ...prev, [currentDayKey]: false }));
-                    if (mode === 'traffic') { showStatus("🔄 行程内容已更改，地图将在下次切换/手动刷新时重新绘制。"); }
+
+                // 生成签名：ID + Location + SkipMap
+                // 只有当这些属性变化时，地图才需要重新绘制。
+                // 如果您只是改了标题、时间、描述，oldSig === newSig，缓存不会被清空。
+                const getMapSignature = (d) => d.items.map(i => `${i.id}|${i.location}|${i.skipMap}`).join('||');
+                
+                const oldSig = getMapSignature(oldDay);
+                const newSig = getMapSignature(updatedDay);
+
+                // 只有当地图相关的签名变化时，才清空缓存
+                if (oldSig !== newSig) {
+                     const currentDayKey = `${newPlans[activePlanIdx].days[dayIdx].id}`;
+                     if (mapLoadHistory[currentDayKey]) {
+                        setMapLoadHistory(prev => ({ ...prev, [currentDayKey]: false }));
+                     }
                 }
             };
 
@@ -1390,6 +1431,7 @@
 
             const updateStartDate = (date) => { if(!date) return; const newPlans = [...plans]; newPlans[activePlanIdx].startDate = date; setPlans(newPlans); setShowDatePicker(false); showStatus("🗓️ 出发日期已更新！"); };
 
+            // 贴心建议
             const getTips = () => {
                 const tips = [];
                 if (currentWeather) {
@@ -1399,14 +1441,32 @@
                     const type = weather.dayWeather || weather.weather || '多云';
 
                     let clothingText = "";
-                    if (minTemp < 10) { clothingText = "羽绒服、厚大衣、围巾 (早晚很冷，风很大，记得多带件厚外套哦)"; } else if (minTemp < 15) { clothingText = "风衣、卫衣、薄毛衣 (洋葱穿衣法，热了脱冷了穿)"; } else if (minTemp < 22) { clothingText = "长袖T恤、衬衫、单裤 (舒适为主)"; } else { clothingText = "短袖、裙子 (记得防晒)"; }
-                    if (type.includes('雨')) { clothingText += "，记得穿防滑防水的鞋子。"; }
-                    tips.push({ title: "👗 穿衣推荐", content: `${clothingText} (参考温度：${minTemp}°-${maxTemp}°)` });
-                } else { tips.push({ title: "👗 穿衣推荐", content: "正在获取实时天气以推荐穿衣..." }); }
-                if (currentWeather && (currentWeather.dayWeather || '').includes('雨')) { tips.push({ title: "🌧️ 下雨备忘", content: "包里得常备一把轻便折叠伞，既能遮阳又能挡雨。" }); }
-                tips.push({ title: "🌶️ 成都胃", content: "如果不太能吃辣，又想试试，那我们就鸳鸯锅，实在不行唯怡豆奶解辣哈哈哈" });
-                tips.push({ title: "🐼 熊猫早起", content: "貌似看花花建议早上7:30前到南门排队，晚了只能看人头。" });
-                tips.push({ title: "👟 舒适出行", content: "行程可能要走不少路，穿双舒服的平底鞋哦。累了我们就找个茶馆坐坐？" });
+                    if (minTemp < 10) { 
+                        clothingText = "成都的冷是渗进去的湿冷，体感温度会比预报低3-5度。建议备一件防风的厚外套，以免晚上受凉。"; 
+                    } else if (minTemp < 15) { 
+                        clothingText = "早晚温差比较明显，中午可能觉得热，但太阳落山后降温很快。"; 
+                    } else { 
+                        clothingText = "气温比较舒适，但如果是阴天，体感会偏凉。"; 
+                    }
+                    
+                    tips.push({ title: "🌡️ 关于气温", content: `${clothingText} (预报：${minTemp}°-${maxTemp}°)` });
+                    
+                    if ((type || '').includes('雨')) { 
+                        tips.push({ title: "🌧️ 天气提醒", content: "预报有雨，青石板路面潮湿可能会滑，走路时请留意脚下。" }); 
+                    }
+                } else { 
+                    tips.push({ title: "🌡️ 气温提示", content: "正在同步实时天气数据..." }); 
+                }
+
+                // 2. 饮食关怀：考虑到她是江苏人（口味偏甜/清淡），对成都油辣的隐晦关心
+                tips.push({ title: "🌶️ 口味参考", content: "初到成都，红油可能比想象中厚重。本地火锅多为牛油锅底，厚重感强。辣度分级参考：微微辣 ≈ 外地中辣。唯怡豆奶是本地解辣标配。" });
+
+                // 3. 行程关怀：强调“不累”，给她心理减负，而不是说“我会背你”
+                tips.push({ title: "👟 出行建议", content: "行程可能要走不少路，穿双舒服的平底鞋哦。累了我们就找个茶馆坐坐？" });
+
+                // 4. 特殊提醒：客观的生理舒适度提醒
+                tips.push({ title: "🐼 熊猫基地", content: "如果早起去熊猫基地，建议多穿一层。山上树木多，清晨湿度大，比市区更冷一些。" });
+
                 return tips;
             };
 
@@ -1416,6 +1476,9 @@
                         <div className="w-full md:max-w-md bg-white md:rounded-[40px] relative h-full flex flex-col overflow-hidden shadow-2xl">
                             <div className="relative z-50 p-6 pb-2 border-b border-gray-100 flex justify-between items-center ui-control bg-white">
                                 <div>
+                                    <div className="text-[10px] text-gray-400 font-medium mb-0.5 pl-0.5 tracking-wide">
+                                        {getGreeting()}，beibei。
+                                    </div>
                                     {isEditing ? (
                                         <input value={activePlan.name} onChange={(e) => updatePlanName(e.target.value)} className="font-bold text-xl bg-gray-50 border border-gray-200 p-1.5 -ml-1 rounded w-full max-w-[240px] text-ios-text focus:ring-2 ring-blue-500 outline-none" />
                                     ) : (
@@ -1448,7 +1511,7 @@
                                     <WeatherWidget date={activeDateObj.toISOString().split('T')[0]} onWeatherUpdate={setCurrentWeather} showStatus={showStatus} />
                                     {mode === 'schedule' ? 
                                         <ScheduleView day={activeDay} isEditing={isEditing} setIsEditing={setIsEditing} onUpdateDay={handleUpdateDay} onImageUpload={async (id, fs) => { const imgs = []; for(let f of fs) imgs.push(await fileToBase64(f)); const p = [...plans]; const items = p[activePlanIdx].days[dayIdx].items; items.find(i=>i.id===id).images.push(...imgs); setPlans(p); }} /> 
-                                    : <TrafficView day={activeDay} showStatus={showStatus} mapLoadHistory={mapLoadHistory} updateMapLoadHistory={updateMapLoadHistory} geoCache={geoCache} updateGeoCache={updateGeoCache} />}
+                                    : <TrafficView day={activeDay} showStatus={showStatus} mapLoadHistory={mapLoadHistory} updateMapLoadHistory={updateMapLoadHistory} geoCache={geoCache} updateGeoCache={updateGeoCache} isEditing={isEditing} />}
                                 </div>
                                 <div className="hidden md:block">
                                      <ScheduleView day={activeDay} isEditing={isEditing} setIsEditing={setIsEditing} onUpdateDay={handleUpdateDay} onImageUpload={async (id, fs) => { const imgs = []; for(let f of fs) imgs.push(await fileToBase64(f)); const p = [...plans]; const items = p[activePlanIdx].days[dayIdx].items; items.find(i=>i.id===id).images.push(...imgs); setPlans(p); }} />
@@ -1465,7 +1528,7 @@
                         <div className="hidden md:flex flex-col flex-1 gap-6 h-full">
                             <WeatherWidget date={activeDateObj.toISOString().split('T')[0]} onWeatherUpdate={setCurrentWeather} showStatus={showStatus} />
                             <div className="flex-1 bg-white rounded-[40px] shadow-xl overflow-hidden p-1">
-                                <TrafficView day={activeDay} showStatus={showStatus} mapLoadHistory={mapLoadHistory} updateMapLoadHistory={updateMapLoadHistory} geoCache={geoCache} updateGeoCache={updateGeoCache} />
+                                <TrafficView day={activeDay} showStatus={showStatus} mapLoadHistory={mapLoadHistory} updateMapLoadHistory={updateMapLoadHistory} geoCache={geoCache} updateGeoCache={updateGeoCache} isEditing={isEditing} />
                             </div>
                         </div>
                     </div>
@@ -1593,7 +1656,7 @@
                         <div className="fixed inset-0 bg-black/40 z-[10000] flex items-center justify-center p-8" onClick={() => setShowTips(false)}>
                             <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative animate-[fadeIn_0.2s_ease-out]" onClick={e => e.stopPropagation()}>
                                 <div className="flex justify-between items-center mb-4">
-                                    <h3 className="font-bold text-lg flex items-center gap-2">💡 贴心小建议</h3>
+                                    <h3 className="font-bold text-lg flex items-center gap-2">💡 一些小建议</h3>
                                     <button onClick={() => setShowTips(false)} className="p-2 bg-gray-100 rounded-full"><X size={16}/></button>
                                 </div>
                                 <div className="space-y-3 text-sm text-gray-600 leading-relaxed">
