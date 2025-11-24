@@ -960,6 +960,10 @@
             useEffect(() => {
                 if (isEditing) return;
 
+                // 2. 【核心修复】如果地图容器当前不可见（例如手机上隐藏的电脑版地图），直接停止运行
+                // 这样可以防止手机端后台跑电脑版的逻辑，导致重复提示
+                if (mapContainerRef.current && mapContainerRef.current.offsetParent === null) return;
+
                 const initMap = async () => {
                     const currentDayKey = getCurrentDayKey();
                     const isLoaded = mapLoadHistory[currentDayKey];
@@ -1010,7 +1014,7 @@
 
                 initMap();
                 return () => { clearTimeout(mapTimeoutRef.current); if (mapInstance.current) { mapInstance.current.clearMap(); } };
-            }, [routeSignature, isEditing]); 
+            }, [routeSignature, isEditing]);
 
             const geocodeWithTimeout = (geocoder, location, timeout = 5000) => {
                 return new Promise((resolve, reject) => {
