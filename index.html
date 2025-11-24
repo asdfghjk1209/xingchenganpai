@@ -519,47 +519,65 @@
             );
         };
 
+        // 3. HelpModal (女友专属版：零门槛，大白话，无乱码)
         const HelpModal = ({ onClose }) => (
             <div className="fixed inset-0 bg-black/40 z-[10005] flex items-center justify-center p-8" onClick={onClose}>
                 <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl relative animate-[fadeIn_0.2s_ease-out]" onClick={e => e.stopPropagation()}>
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 className="font-bold text-xl flex items-center gap-2 text-ios-blue"><Info size={20}/> 新手指南</h3>
-                        <button onClick={onClose} className="p-2 bg-gray-100 rounded-full"><X size={16}/></button>
+                    <div className="flex justify-between items-center mb-6">
+                        <h3 className="font-bold text-xl flex items-center gap-2 text-ios-blue">✨ 一个小小的说明</h3>
+                        <button onClick={onClose} className="p-2 bg-gray-100 rounded-full hover:bg-gray-200"><X size={16}/></button>
                     </div>
-                    <div className="space-y-4 text-sm text-gray-700 max-h-[70vh] overflow-y-auto custom-scrollbar">
-                        <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
-                            <span className="font-bold text-base block mb-1 text-blue-800">1. 方案与日期切换</span>
-                            <ul className="list-disc list-inside space-y-1 ml-2">
-                                <li>点击顶部**方案名称**可以切换或新增方案。</li>
-                                <li>点击**日期**可以设置出发日期，并使用左右箭头切换天数。</li>
-                            </ul>
+                    
+                    <div className="space-y-4 text-sm text-gray-700 max-h-[65vh] overflow-y-auto custom-scrollbar">
+                        
+                        {/* 第一块：基础操作 */}
+                        <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
+                            <span className="font-bold text-base block mb-2 text-blue-800 flex items-center gap-2">📅 怎么看行程？</span>
+                            <p className="leading-relaxed">
+                                顶部那个大标题是当前的计划，点一下可以<span className="font-bold text-blue-600">切换别的方案</span>。
+                                <br/>
+                                想要看明天或者后天的安排？直接点日期的<span className="font-bold text-blue-600">左右小箭头</span>就能翻页啦，没有说明<span className="font-bold text-red-600">还没创建</span>哈哈哈。
+                            </p>
                         </div>
                         
-                        <div className="p-3 bg-green-50 rounded-xl border border-green-100">
-                            <span className="font-bold text-base block mb-1 text-green-800">2. 编辑与拖动排序 (重点!)</span>
-                            <ul className="list-disc list-inside space-y-1 ml-2">
-                                <li>点击底部的**“编辑”按钮**进入编辑模式。</li>
-                                <li>在编辑模式下，您可以修改所有活动的**时间、标题、描述**等。</li>
-                                <li>**拖动排序**：在编辑模式下，长按（手机）或点击拖动（电脑）任意活动卡片，拖到新的位置后松开，即可调整顺序。</li>
-                                <li>编辑完成后，点击底部的**“完成”按钮**退出。</li>
+                        {/* 第二块：修改与排序 (核心) */}
+                        <div className="p-4 bg-green-50 rounded-2xl border border-green-100">
+                            <span className="font-bold text-base block mb-2 text-green-800 flex items-center gap-2">✏️ 想改动或者换顺序？</span>
+                            <ul className="list-disc list-inside space-y-2 ml-1">
+                                <li>
+                                    点击屏幕最下面的<span className="font-bold text-black bg-white px-2 py-0.5 rounded-lg border shadow-sm mx-1">编辑</span>按钮。
+                                </li>
+                                <li>
+                                    <span className="font-bold text-green-700">改内容：</span>像发微信一样，直接点文字就能改。
+                                </li>
+                                <li>
+                                    <span className="font-bold text-green-700">换顺序：</span>就像整理手机桌面图标一样，<span className="font-bold">长按住</span>某个活动卡片的右下角不松手，拖到你想要的位置放下就行。
+                                </li>
+                                <li>
+                                    改完记得点<span className="font-bold text-black bg-white px-2 py-0.5 rounded-lg border shadow-sm mx-1">完成</span>哦！
+                                </li>
                             </ul>
                         </div>
 
-                        <div className="p-3 bg-orange-50 rounded-xl border border-orange-100">
-                            <span className="font-bold text-base block mb-1 text-orange-800">3. 地图与导航</span>
-                            <ul className="list-disc list-inside space-y-1 ml-2">
-                                <li>点击右上角的**“地图”图标**（手机端）或查看**右侧面板**（电脑端），可以看到今日路线图。</li>
-                                <li>底部的路线列表会显示地点是否被地图识别，**地点未找到**的卡片需要点击编辑修改。</li>
-                                <li>点击**“导航到下一站”**按钮可以直接跳转到高德地图App进行路线规划。</li>
-                            </ul>
+                        {/* 第三块：地图 */}
+                        <div className="p-4 bg-orange-50 rounded-2xl border border-orange-100">
+                            <span className="font-bold text-base block mb-2 text-orange-800 flex items-center gap-2">🗺️ 找不着路了？</span>
+                            <p className="leading-relaxed mb-2">
+                                手机右上角有个<span className="font-bold text-orange-600">地图图标</span>，点它就能看到今天的路线图。
+                            </p>
+                            <p className="leading-relaxed">
+                                每个活动下面都有个<span className="font-bold text-orange-600">导航按钮</span>，点了会直接跳到高德地图带你走，不用自己搜！
+                            </p>
                         </div>
 
-                        <div className="p-3 bg-gray-100 rounded-xl border border-gray-200">
-                            <span className="font-bold text-base block mb-1 text-gray-800">4. 备份与分享</span>
-                            <ul className="list-disc list-inside space-y-1 ml-2">
-                                <li>点击右上角的**“设置”图标**可以进行备份、导入、分享长图等操作。</li>
-                                <li>建议定期**“备份所有数据”**以防丢失。</li>
-                            </ul>
+                        {/* 第四块：保存 */}
+                        <div className="p-4 bg-gray-100 rounded-2xl border border-gray-200">
+                            <span className="font-bold text-base block mb-2 text-gray-800 flex items-center gap-2">📸 存进相册</span>
+                            <p className="leading-relaxed">
+                                点右上角的 <Settings size={14} className="inline"/> 设置图标，选<span className="font-bold text-gray-900">“生成行程长图”</span>。
+                                <br/>
+                                手机上<span className="font-bold">长按图片</span>就能保存到相册，就不怕记不住了哈哈哈
+                            </p>
                         </div>
                     </div>
                 </div>
