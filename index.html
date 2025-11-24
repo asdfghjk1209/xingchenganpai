@@ -1075,7 +1075,22 @@
             const getNextValidIndex = (currentIndex, items) => {
                 for (let i = currentIndex + 1; i < items.length; i++) { const item = items[i]; const isFailed = failedLocs.has(item.id); if (!item.skipMap && !isFailed) { return i; } } return -1;
             };
-            const handleRetry = () => { setIsLoading(true); updateMapMarkers(true); };
+            // 修复后的 handleRetry：增加 async/await 和 finally，确保 Loading 会消失
+            const handleRetry = async () => { 
+                setIsLoading(true); 
+                try {
+                    // 先清理地图，避免残留
+                    if(mapInstance.current) mapInstance.current.clearMap();
+                    // 等待标记绘制完成
+                    await updateMapMarkers(true);
+                } catch (e) {
+                    console.error("Retry failed", e);
+                    if(showStatus) showStatus("刷新遇到错误，请重试");
+                } finally {
+                    // 关键修复：无论成功还是失败，必须关闭 Loading 状态
+                    setIsLoading(false); 
+                }
+            };
             const openFullMap = () => { const query = day.items.map(i => i.location).filter(l => l && l !== '待定').join('|'); window.open(`https://www.amap.com/search?query=${encodeURIComponent(query)}`, '_blank'); };
             const forceCenter = () => { if(mapInstance.current) mapInstance.current.setFitView(null, false, [40, 40, 40, 40]); };
 
