@@ -381,9 +381,21 @@
             );
         };
 
+        // 2. TimePicker (最终修复版：解耦滚轮与触摸，流畅且精准)
         const TimePicker = ({ value, onChange, onClose }) => {
+            // 初始化时间
             const [hour, setHour] = useState(parseInt(value.split(':')[0]) || 9);
             const [minute, setMinute] = useState(parseInt(value.split(':')[1]) || 0);
+            
+            // 使用 Ref 追踪最新值，避免 useEffect 频繁重置监听器导致卡顿
+            const hourValRef = useRef(hour);
+            const minuteValRef = useRef(minute);
+            const isWheeling = useRef(false); // 标记是否正在使用滚轮
+
+            // 同步 Ref
+            hourValRef.current = hour;
+            minuteValRef.current = minute;
+
             const hours = Array.from({ length: 24 }, (_, i) => i);
             const minutes = Array.from({ length: 60 }, (_, i) => i);
 
@@ -397,10 +409,67 @@
             const hourRef = useRef(null);
             const minuteRef = useRef(null);
 
+            // 1. 监听滚轮事件 (电脑端核心逻辑)
+            useEffect(() => {
+                const handleWheel = (e, isHour) => {
+                    e.preventDefault(); // 阻止浏览器原生滚动
+                    isWheeling.current = true; // 标记开始滚轮控制
+
+                    const currentVal = isHour ? hourValRef.current : minuteValRef.current;
+                    const max = isHour ? 23 : 59;
+                    
+                    // 限制滚动频率，一次只跳一格
+                    if (Math.abs(e.deltaY) < 10) return;
+
+                    const direction = e.deltaY > 0 ? 1 : -1;
+                    let nextVal = currentVal + direction;
+
+                    // 边界检查
+                    if (nextVal < 0) nextVal = 0;
+                    if (nextVal > max) nextVal = max;
+
+                    if (isHour) setHour(nextVal);
+                    else setMinute(nextVal);
+
+                    // 滚轮结束 200ms 后释放锁
+                    clearTimeout(window.wheelTimer);
+                    window.wheelTimer = setTimeout(() => {
+                        isWheeling.current = false;
+                    }, 200);
+                };
+
+                const hEl = hourRef.current;
+                const mEl = minuteRef.current;
+
+                // 绑定非被动事件监听器
+                const onHourWheel = (e) => handleWheel(e, true);
+                const onMinuteWheel = (e) => handleWheel(e, false);
+
+                if (hEl) hEl.addEventListener('wheel', onHourWheel, { passive: false });
+                if (mEl) mEl.addEventListener('wheel', onMinuteWheel, { passive: false });
+
+                return () => {
+                    if (hEl) hEl.removeEventListener('wheel', onHourWheel);
+                    if (mEl) mEl.removeEventListener('wheel', onMinuteWheel);
+                };
+            }, []); // 空依赖数组，只绑定一次，性能最好
+
+            // 2. 自动对齐滚动位置 (当数据改变时，让UI滚到正确位置)
             useEffect(() => {
                 if (hourRef.current) hourRef.current.scrollTop = hour * 40;
+            }, [hour]);
+
+            useEffect(() => {
                 if (minuteRef.current) minuteRef.current.scrollTop = minute * 40;
-            }, []);
+            }, [minute]);
+
+            // 3. 处理触摸滚动 (手机端逻辑)
+            // 只有当不是在用滚轮时，才允许原生滚动触发数据更新
+            const handleScroll = (e, setter) => {
+                if (isWheeling.current) return; // 如果是滚轮在动，忽略原生滚动事件
+                const val = Math.round(e.target.scrollTop / 40);
+                setter(val);
+            };
 
             return (
                 <div className="fixed inset-0 z-[10001] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm ui-control" onClick={onClose}>
@@ -410,15 +479,18 @@
                             <button onClick={handleConfirm} className="text-ios-blue font-bold px-4 py-1 rounded-full bg-blue-50">确定</button>
                         </div>
                         <div className="flex h-48 relative">
+                            {/* 选中框高亮背景 */}
                             <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-10 border-t border-b border-gray-200 pointer-events-none bg-gray-50/30"></div>
-                            <div ref={hourRef} className="flex-1 overflow-y-auto no-scrollbar time-scroll-col text-center scroll-smooth" 
-                                 onScroll={(e) => {
-                                     const h = Math.round(e.target.scrollTop / 40);
-                                     if(h >=0 && h<=23) setHour(h);
-                                 }}>
+                            
+                            {/* 小时列 - 移除了 time-scroll-col 类以禁用 CSS Snap */}
+                            <div ref={hourRef} 
+                                 className="flex-1 overflow-y-auto no-scrollbar text-center scroll-smooth" 
+                                 style={{ scrollSnapType: 'none' }} // 强制禁用 CSS 吸附，交给 JS 控制
+                                 onScroll={(e) => handleScroll(e, setHour)}>
                                 <div className="h-[80px]"></div> 
                                 {hours.map(h => (
-                                    <div key={h} className={`h-10 flex items-center justify-center text-lg transition-all ${h === hour ? 'text-black font-bold scale-110' : 'text-gray-300'}`}>
+                                    <div key={h} className={`h-10 flex items-center justify-center text-lg transition-all cursor-pointer hover:bg-gray-50 ${h === hour ? 'text-black font-bold scale-110' : 'text-gray-300'}`}
+                                         onClick={() => setHour(h)}>
                                         {h.toString().padStart(2, '0')}
                                     </div>
                                 ))}
@@ -427,14 +499,15 @@
 
                             <div className="w-4 flex items-center justify-center font-bold pb-1 text-gray-400">:</div>
 
-                            <div ref={minuteRef} className="flex-1 overflow-y-auto no-scrollbar time-scroll-col text-center scroll-smooth" 
-                                 onScroll={(e) => {
-                                     const m = Math.round(e.target.scrollTop / 40);
-                                     if(m >=0 && m<=59) setMinute(m);
-                                 }}>
+                            {/* 分钟列 */}
+                            <div ref={minuteRef} 
+                                 className="flex-1 overflow-y-auto no-scrollbar text-center scroll-smooth" 
+                                 style={{ scrollSnapType: 'none' }} // 强制禁用 CSS 吸附
+                                 onScroll={(e) => handleScroll(e, setMinute)}>
                                 <div className="h-[80px]"></div>
                                 {minutes.map(m => (
-                                    <div key={m} className={`h-10 flex items-center justify-center text-lg transition-all ${m === minute ? 'text-black font-bold scale-110' : 'text-gray-300'}`}>
+                                    <div key={m} className={`h-10 flex items-center justify-center text-lg transition-all cursor-pointer hover:bg-gray-50 ${m === minute ? 'text-black font-bold scale-110' : 'text-gray-300'}`}
+                                         onClick={() => setMinute(m)}>
                                         {m.toString().padStart(2, '0')}
                                     </div>
                                 ))}
