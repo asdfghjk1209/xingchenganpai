@@ -493,142 +493,149 @@
             </div>
         );
 
-        // 1. WeatherWidget (防卡死版：精准定位超时自动降级)
+        // 1. WeatherWidget (最终修正版：Promise竞速模式，彻底防止死锁转圈)
         const WeatherWidget = ({ date, onWeatherUpdate, showStatus }) => {
             const [weatherData, setWeatherData] = useState(null);
             const [location, setLocation] = useState({ id: 1, name: '定位中...', adcode: '' });
             const [isSearching, setIsSearching] = useState(false);
             const [searchQuery, setSearchQuery] = useState('');
             const [isLoading, setIsLoading] = useState(true);
-            const loadingTimeoutRef = useRef(null);
+            
+            // 这是一个通用工具：把任何高德的回调变成 Promise，并强制 5秒 超时
+            // 如果 5秒 内高德没回调，就自动 reject，防止卡死
+            const amapPromise = (apiCallFn, timeoutMs = 5000) => {
+                return new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => {
+                        reject(new Error("API_TIMEOUT"));
+                    }, timeoutMs);
 
-            // 清理Loading状态的通用函数
-            const clearLoading = (message) => {
-                if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-                setIsLoading(false);
-                if (message && showStatus) showStatus(message);
+                    try {
+                        apiCallFn((status, result) => {
+                            clearTimeout(timer);
+                            resolve({ status, result });
+                        });
+                    } catch (e) {
+                        clearTimeout(timer);
+                        reject(e);
+                    }
+                });
             };
 
-            // 获取天气 (通用业务逻辑)
-            const fetchWeather = (adcodeOrName) => {
+            // 获取天气 (带超时保护)
+            const fetchWeather = async (adcodeOrName) => {
                 if (!window.AMap) return;
                 setIsLoading(true);
-                
-                // 天气请求最长给 10秒，超时自动关闭Loading
-                if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-                loadingTimeoutRef.current = setTimeout(() => setIsLoading(false), 10000); 
 
-                window.AMap.plugin('AMap.Weather', function() {
+                try {
+                    await new Promise(resolve => window.AMap.plugin('AMap.Weather', resolve));
                     var weather = new window.AMap.Weather();
-                    Promise.all([
-                        new Promise(r => weather.getLive(adcodeOrName, (err, data) => r({ type: 'live', err, data }))),
-                        new Promise(r => weather.getForecast(adcodeOrName, (err, data) => r({ type: 'forecast', err, data })))
-                    ]).then(results => {
-                        if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-                        setIsLoading(false);
 
-                        const liveRes = results.find(r => r.type === 'live');
-                        const forecastRes = results.find(r => r.type === 'forecast');
-                        let newData = {};
+                    // 并行请求实时和预报，最长等 6 秒
+                    const results = await Promise.allSettled([
+                        amapPromise((cb) => weather.getLive(adcodeOrName, cb), 6000),
+                        amapPromise((cb) => weather.getForecast(adcodeOrName, cb), 6000)
+                    ]);
 
-                        if (!liveRes.err && liveRes.data && liveRes.data.info === 'OK') newData.live = liveRes.data;
-                        if (!forecastRes.err && forecastRes.data && forecastRes.data.forecasts && forecastRes.data.forecasts.length > 0) newData.forecasts = forecastRes.data.forecasts;
+                    const liveRes = results[0].status === 'fulfilled' ? results[0].value : null;
+                    const forecastRes = results[1].status === 'fulfilled' ? results[1].value : null;
 
-                        if (newData.live || newData.forecasts) {
-                            setWeatherData(prev => ({...prev, ...newData}));
-                            if (newData.live && newData.live.city) {
-                                setLocation(prev => ({ ...prev, name: newData.live.city }));
-                            }
-                            if (newData.forecasts && onWeatherUpdate) {
-                                onWeatherUpdate({ location: location.name, weather: newData.forecasts[0] });
-                            }
-                        } else {
-                            // 失败静默回退到成都
-                            if (location.name === '定位中...') {
-                                setLocation({ name: '成都', id: 1, adcode: '510100' });
-                                fetchWeather('510100');
-                            }
+                    let newData = {};
+                    // 处理实时天气
+                    if (liveRes && liveRes.status === null && liveRes.result && liveRes.result.info === 'OK') {
+                         newData.live = liveRes.result;
+                    }
+                    // 处理预报天气
+                    if (forecastRes && forecastRes.status === null && forecastRes.result && forecastRes.result.forecasts) {
+                         newData.forecasts = forecastRes.result.forecasts;
+                    }
+                    
+                    // 更新数据
+                    if (newData.live || newData.forecasts) {
+                        setWeatherData(prev => ({...prev, ...newData}));
+                        if (newData.live && newData.live.city) {
+                            setLocation(prev => ({ ...prev, name: newData.live.city }));
                         }
-                    });
-                });
+                        if (newData.forecasts && onWeatherUpdate) {
+                            onWeatherUpdate({ location: location.name, weather: newData.forecasts[0] });
+                        }
+                    }
+                } catch (e) {
+                    console.warn("天气获取异常", e);
+                } finally {
+                    // 【关键】无论成功失败，强制关闭 loading
+                    setIsLoading(false);
+                }
             };
 
-            // 策略1：IP城市定位 (CitySearch) - 用于初始加载，速度快，不弹窗
-            const autoLocate = () => {
+            // 自动 IP 定位 (CitySearch)
+            const autoLocate = async () => {
                 setIsLoading(true);
-                loadAMap().then(() => {
-                    window.AMap.plugin('AMap.CitySearch', function () {
-                        var citySearch = new window.AMap.CitySearch();
-                        citySearch.getLocalCity(function (status, result) {
-                            if (status === 'complete' && result.info === 'OK') {
-                                console.log("IP定位成功:", result.city);
-                                setLocation({ name: result.city, id: Date.now(), adcode: result.adcode });
-                                fetchWeather(result.adcode);
-                            } else {
-                                console.warn("IP定位失败，回退成都");
-                                setLocation({ name: '成都', id: 1, adcode: '510100' });
-                                fetchWeather('510100');
-                            }
-                        });
-                    });
-                }).catch(e => {
-                    console.error("地图资源加载失败", e);
-                    setIsLoading(false);
+                try {
+                    await loadAMap();
+                    await new Promise(resolve => window.AMap.plugin('AMap.CitySearch', resolve));
+                    
+                    const citySearch = new window.AMap.CitySearch();
+                    // 强制 3秒 超时
+                    const { status, result } = await amapPromise((cb) => citySearch.getLocalCity(cb), 3000);
+
+                    if (status === 'complete' && result.info === 'OK') {
+                        console.log("IP定位成功:", result.city);
+                        setLocation({ name: result.city, id: Date.now(), adcode: result.adcode });
+                        fetchWeather(result.adcode);
+                    } else {
+                        throw new Error("IP定位返回状态非complete");
+                    }
+                } catch (e) {
+                    console.warn("IP定位失败，回退成都", e);
                     setLocation({ name: '成都', id: 1, adcode: '510100' });
                     fetchWeather('510100');
-                });
+                }
             };
 
-            // 策略2：浏览器精准定位 (Geolocation) - 用于手动点击，需授权
-            const handleManualLocate = () => {
+            // 手动精准定位 (Geolocation)
+            const handleManualLocate = async () => {
                 setIsLoading(true);
-                if(showStatus) showStatus("🚀 正在尝试精准定位...");
+                if(showStatus) showStatus("🚀 正在请求精准定位...");
 
-                // 【核心修复】设置一个 5秒 的“保险丝”
-                // 如果 5秒内 GPS 没返回结果（无论是因为用户没点允许，还是网络卡住）
-                // 立即强制切回 IP 定位，并关闭 Loading，防止界面卡死
-                loadingTimeoutRef.current = setTimeout(() => {
-                    console.warn("精准定位超时，自动降级为 IP 定位");
-                    if(showStatus) showStatus("⚠️ 精准定位超时，已切换到城市定位");
-                    autoLocate(); // 降级！
-                }, 5000);
+                try {
+                    await loadAMap();
+                    await new Promise(resolve => window.AMap.plugin('AMap.Geolocation', resolve));
 
-                loadAMap().then(() => {
-                    window.AMap.plugin('AMap.Geolocation', function() {
-                        var geolocation = new window.AMap.Geolocation({
-                            enableHighAccuracy: true, // 开启高精度
-                            timeout: 4000,            // API 内部超时设为 4秒 (比保险丝短一点)
-                            buttonOffset: new window.AMap.Pixel(10, 20),
-                        });
-
-                        geolocation.getCurrentPosition(function(status, result) {
-                            // 只要回调触发了，就先清除“保险丝”，避免重复执行
-                            if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
-
-                            if (status === 'complete') {
-                                // 定位成功
-                                const comp = result.addressComponent;
-                                let displayName = comp.district || comp.township || result.formattedAddress;
-                                if(displayName && displayName.length > 6) displayName = comp.city || comp.province;
-                                
-                                setLocation({ name: displayName, id: Date.now(), adcode: comp.adcode });
-                                fetchWeather(comp.adcode); 
-                                if(showStatus) showStatus(`📍 精准定位: ${displayName}`);
-                            } else {
-                                // 定位出错（用户拒绝、或服务不可用），立刻降级
-                                console.warn("精准定位出错:", result.message);
-                                if(showStatus) showStatus("⚠️ 无法获取精准位置，尝试获取城市...");
-                                autoLocate();
-                            }
-                        });
+                    const geolocation = new window.AMap.Geolocation({
+                        enableHighAccuracy: true,
+                        timeout: 5000, // API 内部超时
+                        buttonOffset: new window.AMap.Pixel(10, 20),
                     });
-                });
+
+                    // 强制 6秒 竞速超时 (比API超时多1秒)
+                    // 如果浏览器没反应，这里会强制抛出错误
+                    const { status, result } = await amapPromise((cb) => geolocation.getCurrentPosition(cb), 6000);
+
+                    if (status === 'complete') {
+                        const comp = result.addressComponent;
+                        let displayName = comp.district || comp.township || result.formattedAddress;
+                        if(displayName && displayName.length > 6) displayName = comp.city || comp.province;
+
+                        if(showStatus) showStatus(`📍 精准定位: ${displayName}`);
+                        setLocation({ name: displayName, id: Date.now(), adcode: comp.adcode });
+                        fetchWeather(comp.adcode);
+                    } else {
+                        throw new Error("定位状态非success");
+                    }
+                } catch (e) {
+                    // 捕获超时或错误
+                    console.warn("精准定位失败/超时:", e);
+                    if(showStatus) showStatus("⚠️ 精准定位超时，切换为城市定位");
+                    // 失败后立即尝试 IP 定位
+                    autoLocate();
+                }
+                // 注意：这里不写 finally setIsLoading(false)，因为 autoLocate 或 fetchWeather 会接手控制 loading
+                // 只要逻辑链路不断，最后一定会在 fetchWeather 的 finally 里关闭 loading
             };
 
-            // 初始加载：使用 IP 定位 (不打扰用户)
+            // 初始化
             useEffect(() => {
                 autoLocate();
-                return () => { if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current); };
             }, []);
 
             const handleSearch = (e) => {
@@ -667,7 +674,6 @@
                         {!isSearching && (
                             <div className="flex items-center gap-3 ui-control">
                                 <div className="flex gap-2">
-                                    {/* 只有点击这个按钮，才触发容易卡住的 GPS 定位 */}
                                     <button onClick={handleManualLocate} className="p-2 bg-gray-100 rounded-full hover:bg-blue-50 text-gray-500 hover:text-blue-600 transition-colors" title="精准定位"><Navigation size={14}/></button>
                                     <button onClick={() => fetchWeather(location.name)} className="p-2 bg-gray-100 rounded-full hover:bg-blue-50 text-gray-500 hover:text-blue-600 transition-colors" title="刷新天气"><RotateCw size={14}/></button>
                                 </div>
