@@ -493,7 +493,7 @@
             </div>
         );
 
-        // 1. WeatherWidget (文案修正版：通用定位提示，兼容电脑/手机)
+        // 1. WeatherWidget (硬核版：原生GPS强力定位，杜绝IP漂移)
         const WeatherWidget = ({ date, onWeatherUpdate, showStatus }) => {
             const [weatherData, setWeatherData] = useState(null);
             const [location, setLocation] = useState({ id: 1, name: '定位中...', adcode: '' });
@@ -546,7 +546,9 @@
                     
                     if (newData.live || newData.forecasts) {
                         setWeatherData(prev => ({...prev, ...newData}));
-                        if (newData.live && newData.live.city) {
+                        // 只有当 location 还是初始值或不准确时，才用天气的城市名覆盖
+                        // 如果我们已经通过 GPS 拿到了精确区县，就不覆盖了
+                        if (location.name === '定位中...' && newData.live && newData.live.city) {
                             setLocation(prev => ({ ...prev, name: newData.live.city }));
                         }
                         if (newData.forecasts && onWeatherUpdate) {
@@ -560,7 +562,7 @@
                 }
             };
 
-            // 自动 IP 定位 (兜底方案)
+            // 自动 IP 定位 (仅用于页面刚打开时的兜底)
             const autoLocate = async () => {
                 setIsLoading(true);
                 try {
@@ -571,56 +573,97 @@
                     const { status, result } = await amapPromise((cb) => citySearch.getLocalCity(cb), 3000);
 
                     if (status === 'complete' && result.info === 'OK') {
-                        console.log("自动定位结果:", result.city);
-                        setLocation({ name: result.city, id: Date.now(), adcode: result.adcode });
-                        fetchWeather(result.adcode);
-                    } else {
-                        throw new Error("IP定位失败");
+                        // 只有当用户还没手动定位过，才更新
+                        if(location.name === '定位中...' || location.name === '成都') {
+                            console.log("自动定位(IP):", result.city);
+                            setLocation({ name: result.city, id: Date.now(), adcode: result.adcode });
+                            fetchWeather(result.adcode);
+                        }
                     }
                 } catch (e) {
-                    console.warn("定位完全失败，回退默认", e);
                     setLocation({ name: '成都', id: 1, adcode: '510100' });
                     fetchWeather('510100');
                 }
             };
 
-            // 手动精准定位 (文案已修正)
+            // 【核心修改】原生 GPS 定位 + 高德逆地理编码
             const handleManualLocate = async () => {
                 setIsLoading(true);
-                // 【修改点】文案改为“正在获取精准位置”，不再提“手机GPS”
-                if(showStatus) showStatus("🚀 正在获取精准位置，请稍候...");
+                if(showStatus) showStatus("🚀 正在调用原生 GPS，请保持屏幕常亮...");
 
-                try {
-                    await loadAMap();
-                    await new Promise(resolve => window.AMap.plugin('AMap.Geolocation', resolve));
-
-                    const geolocation = new window.AMap.Geolocation({
-                        enableHighAccuracy: true, 
-                        timeout: 10000,           
-                        maximumAge: 0,            
-                        convert: true,            
-                        buttonOffset: new window.AMap.Pixel(10, 20),
-                    });
-
-                    const { status, result } = await amapPromise((cb) => geolocation.getCurrentPosition(cb), 12000);
-
-                    if (status === 'complete') {
-                        const comp = result.addressComponent;
-                        let displayName = comp.district || comp.township || result.formattedAddress;
-                        if(displayName && displayName.length > 6) displayName = comp.city || comp.province;
-
-                        if(showStatus) showStatus(`📍 定位成功: ${displayName}`);
-                        setLocation({ name: displayName, id: Date.now(), adcode: comp.adcode });
-                        fetchWeather(comp.adcode);
-                    } else {
-                        throw new Error("定位状态非complete");
-                    }
-                } catch (e) {
-                    console.warn("精准定位失败:", e);
-                    // 【修改点】文案改为“无法获取精准位置”
-                    if(showStatus) showStatus("⚠️ 无法获取精准位置，已切换为城市定位");
-                    autoLocate();
+                if (!navigator.geolocation) {
+                    if(showStatus) showStatus("❌ 您的浏览器不支持 GPS 定位");
+                    setIsLoading(false);
+                    return;
                 }
+
+                // 1. 调用原生浏览器 GPS
+                navigator.geolocation.getCurrentPosition(
+                    async (position) => {
+                        try {
+                            const { latitude, longitude } = position.coords;
+                            if(showStatus) showStatus("✅ GPS获取成功，正在解析地址...");
+
+                            await loadAMap();
+                            // 2. 坐标转换 (WGS84 -> GCJ02)
+                            // 因为原生GPS是 WGS84，高德地图是 GCJ02，不转换会偏移几百米
+                            const gpsLngLat = [longitude, latitude];
+                            
+                            window.AMap.convertFrom(gpsLngLat, 'gps', async function (status, result) {
+                                if (status === 'complete' && result.locations) {
+                                    const finalLngLat = result.locations[0];
+
+                                    // 3. 逆地理编码 (坐标 -> 地址)
+                                    await new Promise(resolve => window.AMap.plugin('AMap.Geocoder', resolve));
+                                    const geocoder = new window.AMap.Geocoder();
+                                    
+                                    geocoder.getAddress(finalLngLat, function(status, result) {
+                                        if (status === 'complete' && result.regeocode) {
+                                            const comp = result.regeocode.addressComponent;
+                                            let displayName = comp.district || comp.township || comp.street;
+                                            // 兜底：如果区县都没有，就用城市
+                                            if (!displayName) displayName = comp.city;
+                                            
+                                            if(showStatus) showStatus(`📍 精准锁定: ${displayName} (${comp.city})`);
+                                            
+                                            // 强制更新位置，绝不使用 IP 结果
+                                            setLocation({ name: displayName, id: Date.now(), adcode: comp.adcode });
+                                            fetchWeather(comp.adcode);
+                                        } else {
+                                            throw new Error("地址解析失败");
+                                        }
+                                        setIsLoading(false);
+                                    });
+                                } else {
+                                    throw new Error("坐标转换失败");
+                                }
+                            });
+                        } catch (e) {
+                            console.error(e);
+                            if(showStatus) showStatus("⚠️ 地址解析出错，请重试");
+                            setIsLoading(false);
+                        }
+                    },
+                    (error) => {
+                        // GPS 失败处理
+                        console.error("原生GPS错误:", error);
+                        let errMsg = "定位失败";
+                        switch(error.code) {
+                            case error.PERMISSION_DENIED: errMsg = "❌ 权限被拒绝，请在设置中允许位置权限"; break;
+                            case error.POSITION_UNAVAILABLE: errMsg = "❌ 无法获取位置 (GPS信号弱)"; break;
+                            case error.TIMEOUT: errMsg = "❌ 定位超时，请走到开阔地带"; break;
+                            default: errMsg = "❌ 未知错误";
+                        }
+                        if(showStatus) showStatus(errMsg);
+                        setIsLoading(false);
+                        // 这里我们不再自动回退到 IP 定位，因为用户明确想要精准的，回退了又是南充，不如直接报错让他知道
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 15000, // 给足 15秒
+                        maximumAge: 0
+                    }
+                );
             };
 
             useEffect(() => {
