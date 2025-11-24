@@ -1526,12 +1526,36 @@
                             </div>
 
                             <div className="flex-1 overflow-y-auto px-6 py-4 pb-24 md:custom-scrollbar">
+                                {/* 手机端视图逻辑 */}
                                 <div className="md:hidden">
                                     <WeatherWidget date={activeDateObj.toISOString().split('T')[0]} onWeatherUpdate={setCurrentWeather} showStatus={showStatus} />
+                                    
+                                    {/* 核心逻辑：这里使用三元运算符 (? :) */}
+                                    {/* 当 mode 为 'schedule' 时，TrafficView 被完全移除，不执行任何代码 */}
                                     {mode === 'schedule' ? 
-                                        <ScheduleView day={activeDay} isEditing={isEditing} setIsEditing={setIsEditing} onUpdateDay={handleUpdateDay} onImageUpload={async (id, fs) => { const imgs = []; for(let f of fs) imgs.push(await fileToBase64(f)); const p = [...plans]; const items = p[activePlanIdx].days[dayIdx].items; items.find(i=>i.id===id).images.push(...imgs); setPlans(p); }} /> 
-                                    : <TrafficView day={activeDay} showStatus={showStatus} mapLoadHistory={mapLoadHistory} updateMapLoadHistory={updateMapLoadHistory} geoCache={geoCache} updateGeoCache={updateGeoCache} isEditing={isEditing} />}
+                                        <ScheduleView 
+                                            day={activeDay} 
+                                            isEditing={isEditing} 
+                                            setIsEditing={setIsEditing} 
+                                            onUpdateDay={handleUpdateDay} 
+                                            onImageUpload={async (id, fs) => { const imgs = []; for(let f of fs) imgs.push(await fileToBase64(f)); const p = [...plans]; const items = p[activePlanIdx].days[dayIdx].items; items.find(i=>i.id===id).images.push(...imgs); setPlans(p); }} 
+                                        /> 
+                                    : 
+                                        /* 当点击地图图标切换 mode 为 'traffic' 时，组件才挂载并运行 */
+                                        /* 记得加上 isEditing={isEditing} 以防万一 */
+                                        <TrafficView 
+                                            day={activeDay} 
+                                            showStatus={showStatus} 
+                                            mapLoadHistory={mapLoadHistory} 
+                                            updateMapLoadHistory={updateMapLoadHistory} 
+                                            geoCache={geoCache} 
+                                            updateGeoCache={updateGeoCache} 
+                                            isEditing={isEditing} 
+                                        />
+                                    }
                                 </div>
+
+                                {/* 电脑端视图逻辑 (保持常驻) */}
                                 <div className="hidden md:block">
                                      <ScheduleView day={activeDay} isEditing={isEditing} setIsEditing={setIsEditing} onUpdateDay={handleUpdateDay} onImageUpload={async (id, fs) => { const imgs = []; for(let f of fs) imgs.push(await fileToBase64(f)); const p = [...plans]; const items = p[activePlanIdx].days[dayIdx].items; items.find(i=>i.id===id).images.push(...imgs); setPlans(p); }} />
                                 </div>
